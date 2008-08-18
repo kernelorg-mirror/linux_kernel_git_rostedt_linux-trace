@@ -1087,4 +1087,4 @@ static struct pnp_device_id pnp_ids[] = {
 	{ .id = "FUJ02E3" },
 	{ .id = "" }
 };
-MODULE_DEVICE_TABLE(pnp, pnp_ids);
+MODULE_STATIC_DEVICE_TABLE(pnp, pnp_ids);
