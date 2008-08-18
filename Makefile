@@ -540,7 +540,7 @@ ifdef CONFIG_FTRACE
 KBUILD_CFLAGS	+= -pg
 endif
 
-ifdef CONFIG_ENABLE_WERROR
+ifndef CONFIG_ALLOW_WARNINGS
 KBUILD_CFLAGS	+= -Werror
 endif
 
