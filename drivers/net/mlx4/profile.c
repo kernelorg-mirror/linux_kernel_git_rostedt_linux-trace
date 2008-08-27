@@ -52,6 +52,7 @@ enum {
 	MLX4_RES_NUM
 };
 
+#ifdef CONFIG_MLX4_DEBUG
 static const char *res_name[] = {
 	[MLX4_RES_QP]		= "QP",
 	[MLX4_RES_RDMARC]	= "RDMARC",
@@ -65,6 +66,7 @@ static const char *res_name[] = {
 	[MLX4_RES_MTT]		= "MTT",
 	[MLX4_RES_MCG]		= "MCG",
 };
+#endif
 
 u64 mlx4_make_profile(struct mlx4_dev *dev,
 		      struct mlx4_profile *request,
