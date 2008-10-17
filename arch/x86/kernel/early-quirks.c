@@ -95,6 +95,7 @@ static void __init nvidia_bugs(int num, int slot, int func)
 
 }
 
+#if defined(CONFIG_ACPI) && defined(CONFIG_X86_IO_APIC)
 static u32 ati_ixp4x0_rev(int num, int slot, int func)
 {
 	u32 d;
@@ -112,10 +113,11 @@ static u32 ati_ixp4x0_rev(int num, int slot, int func)
 	d &= 0xff;
 	return d;
 }
+#endif
 
 static void __init ati_bugs(int num, int slot, int func)
 {
-#if defined(CONFIG_ACPI) && defined (CONFIG_X86_IO_APIC)
+#if defined(CONFIG_ACPI) && defined(CONFIG_X86_IO_APIC)
 	u32 d;
 	u8  b;
 
