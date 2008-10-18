@@ -756,8 +756,10 @@ static void sppp_cisco_input (struct sppp *sp, struct sk_buff *skb)
 	case CISCO_ADDR_REQ:
 		/* Stolen from net/ipv4/devinet.c -- SIOCGIFADDR ioctl */
 		{
+#ifdef CONFIG_INET
 		struct in_device *in_dev;
 		struct in_ifaddr *ifa;
+#endif
 		__be32 addr = 0, mask = htonl(~0U); /* FIXME: is the mask correct? */
 #ifdef CONFIG_INET
 		rcu_read_lock();
@@ -1476,4 +1478,5 @@ module_init(sync_ppp_init);
 module_exit(sync_ppp_cleanup);
 module_param(debug, int, 0);
 MODULE_LICENSE("GPL");
+
 
