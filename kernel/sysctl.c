@@ -27,6 +27,7 @@
 #include <linux/security.h>
 #include <linux/ctype.h>
 #include <linux/utsname.h>
+#include <linux/kmemcheck.h>
 #include <linux/smp_lock.h>
 #include <linux/fs.h>
 #include <linux/init.h>
@@ -484,6 +485,16 @@ static struct ctl_table kern_table[] = {
 		.proc_handler	= &ftrace_enable_sysctl,
 	},
 #endif
+#ifdef CONFIG_TRACING
+	{
+		.ctl_name	= CTL_UNNUMBERED,
+		.procname	= "ftrace_dump_on_oops",
+		.data		= &ftrace_dump_on_oops,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= &proc_dointvec,
+	},
+#endif
 #ifdef CONFIG_MODULES
 	{
 		.ctl_name	= KERN_MODPROBE,
@@ -841,6 +852,16 @@ static struct ctl_table kern_table[] = {
 		.maxlen         = sizeof(int),
 		.mode           = 0644,
 		.proc_handler   = &proc_dointvec,
+	},
+#endif
+#ifdef CONFIG_KMEMCHECK
+	{
+		.ctl_name	= CTL_UNNUMBERED,
+		.procname	= "kmemcheck",
+		.data		= &kmemcheck_enabled,
+		.maxlen		= sizeof(int),
+		.mode		= 0644,
+		.proc_handler	= &proc_dointvec,
 	},
 #endif
 #ifdef CONFIG_UNEVICTABLE_LRU

@@ -23,6 +23,34 @@ struct ftrace_ops {
 	struct ftrace_ops *next;
 };
 
+extern int function_trace_stop;
+
+/**
+ * ftrace_stop - stop function tracer.
+ *
+ * A quick way to stop the function tracer. Note this an on off switch,
+ * it is not something that is recursive like preempt_disable.
+ * This does not disable the calling of mcount, it only stops the
+ * calling of functions from mcount.
+ */
+static inline void ftrace_stop(void)
+{
+	function_trace_stop = 1;
+}
+
+/**
+ * ftrace_start - start the function tracer.
+ *
+ * This function is the inverse of ftrace_stop. This does not enable
+ * the function tracing if the function tracer is disabled. This only
+ * sets the function tracer flag to continue calling the functions
+ * from mcount.
+ */
+static inline void ftrace_start(void)
+{
+	function_trace_stop = 0;
+}
+
 /*
  * The ftrace_ops must be a static and should also
  * be read_mostly.  These functions do modify read_mostly variables
@@ -41,10 +69,11 @@ extern void ftrace_stub(unsigned long a0, unsigned long a1);
 # define unregister_ftrace_function(ops) do { } while (0)
 # define clear_ftrace_function(ops) do { } while (0)
 static inline void ftrace_kill(void) { }
+static inline void ftrace_stop(void) { }
+static inline void ftrace_start(void) { }
 #endif /* CONFIG_FUNCTION_TRACER */
 
 #ifdef CONFIG_DYNAMIC_FTRACE
-
 enum {
 	FTRACE_FL_FREE		= (1 << 0),
 	FTRACE_FL_FAILED	= (1 << 1),
@@ -74,6 +103,9 @@ extern void ftrace_caller(void);
 extern void ftrace_call(void);
 extern void mcount_call(void);
 
+/* May be defined in arch */
+extern int ftrace_arch_read_dyn_info(char *buf, int size);
+
 /**
  * ftrace_modify_code - modify code segment
  * @ip: the address of the code segment
@@ -102,7 +134,6 @@ extern void ftrace_release(void *start, unsigned long size);
 
 extern void ftrace_disable_daemon(void);
 extern void ftrace_enable_daemon(void);
-
 #else
 # define skip_trace(ip)				({ 0; })
 # define ftrace_force_update()			({ 0; })
@@ -181,6 +212,11 @@ static inline void __ftrace_enabled_restore(int enabled)
 #endif
 
 #ifdef CONFIG_TRACING
+extern int ftrace_dump_on_oops;
+
+extern void tracing_start(void);
+extern void tracing_stop(void);
+
 extern void
 ftrace_special(unsigned long arg1, unsigned long arg2, unsigned long arg3);
 
@@ -211,6 +247,8 @@ ftrace_special(unsigned long arg1, unsigned long arg2, unsigned long arg3) { }
 static inline int
 ftrace_printk(const char *fmt, ...) __attribute__ ((format (printf, 1, 0)));
 
+static inline void tracing_start(void) { }
+static inline void tracing_stop(void) { }
 static inline int
 ftrace_printk(const char *fmt, ...)
 {
@@ -229,6 +267,11 @@ ftrace_init_module(unsigned long *start, unsigned long *end) { }
 #endif
 
 
+/*
+ * Structure which defines the trace of an initcall.
+ * You don't have to fill the func field since it is
+ * only used internally by the tracer.
+ */
 struct boot_trace {
 	pid_t			caller;
 	char			func[KSYM_NAME_LEN];
@@ -239,13 +282,28 @@ struct boot_trace {
 };
 
 #ifdef CONFIG_BOOT_TRACER
+/* Append the trace on the ring-buffer */
 extern void trace_boot(struct boot_trace *it, initcall_t fn);
+
+/* Tells the tracer that smp_pre_initcall is finished.
+ * So we can start the tracing
+ */
 extern void start_boot_trace(void);
-extern void stop_boot_trace(void);
+
+/* Resume the tracing of other necessary events
+ * such as sched switches
+ */
+extern void enable_boot_trace(void);
+
+/* Suspend this tracing. Actually, only sched_switches tracing have
+ * to be suspended. Initcalls doesn't need it.)
+ */
+extern void disable_boot_trace(void);
 #else
 static inline void trace_boot(struct boot_trace *it, initcall_t fn) { }
 static inline void start_boot_trace(void) { }
-static inline void stop_boot_trace(void) { }
+static inline void enable_boot_trace(void) { }
+static inline void disable_boot_trace(void) { }
 #endif
 
 

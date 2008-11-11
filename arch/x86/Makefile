@@ -73,11 +73,16 @@ else
 
         stackp := $(CONFIG_SHELL) $(srctree)/scripts/gcc-x86_64-has-stack-protector.sh
         stackp-$(CONFIG_CC_STACKPROTECTOR) := $(shell $(stackp) \
-                "$(CC)" -fstack-protector )
+                "$(CC)" "-fstack-protector -DGCC_HAS_SP" )
         stackp-$(CONFIG_CC_STACKPROTECTOR_ALL) += $(shell $(stackp) \
                 "$(CC)" -fstack-protector-all )
 
         KBUILD_CFLAGS += $(stackp-y)
+endif
+
+# Don't unroll struct assignments with kmemcheck enabled
+ifeq ($(CONFIG_KMEMCHECK),y)
+	KBUILD_CFLAGS += $(call cc-option,-fno-builtin-memcpy)
 endif
 
 # Stackpointer is addressed different for 32 bit and 64 bit x86

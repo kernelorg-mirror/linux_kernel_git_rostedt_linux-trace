@@ -516,7 +516,7 @@ extern int audit_signals;
 #define audit_inode(n,d) do { ; } while (0)
 #define audit_inode_child(d,i,p) do { ; } while (0)
 #define audit_core_dumps(i) do { ; } while (0)
-#define auditsc_get_stamp(c,t,s) do { BUG(); } while (0)
+#define auditsc_get_stamp(c,t,s) do { BUG(); *(t) = (struct timespec){ 0, }; } while (0)
 #define audit_get_loginuid(t) (-1)
 #define audit_get_sessionid(t) (-1)
 #define audit_log_task_context(b) do { ; } while (0)
@@ -580,7 +580,8 @@ extern int audit_enabled;
 #define audit_log(c,g,t,f,...) do { ; } while (0)
 #define audit_log_start(c,g,t) ({ NULL; })
 #define audit_log_vformat(b,f,a) do { ; } while (0)
-#define audit_log_format(b,f,...) do { ; } while (0)
+static inline void __attribute__ ((format(printf, 2, 3)))
+audit_log_format(struct audit_buffer *ab, const char *fmt, ...) { }
 #define audit_log_end(b) do { ; } while (0)
 #define audit_log_n_hex(a,b,l) do { ; } while (0)
 #define audit_log_n_string(a,c,l) do { ; } while (0)

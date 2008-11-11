@@ -141,6 +141,11 @@ static void __exit_signal(struct task_struct *tsk)
 	if (sig) {
 		flush_sigqueue(&sig->shared_pending);
 		taskstats_tgid_free(sig);
+		/*
+		 * Make sure ->signal can't go away under rq->lock,
+		 * see account_group_exec_runtime().
+		 */
+		task_rq_unlock_wait(tsk);
 		__cleanup_signal(sig);
 	}
 }
@@ -968,12 +973,9 @@ static void check_stack_usage(void)
 {
 	static DEFINE_SPINLOCK(low_water_lock);
 	static int lowest_to_date = THREAD_SIZE;
-	unsigned long *n = end_of_stack(current);
 	unsigned long free;
 
-	while (*n == 0)
-		n++;
-	free = (unsigned long)n - (unsigned long)end_of_stack(current);
+	free = stack_not_used(current);
 
 	if (free >= lowest_to_date)
 		return;

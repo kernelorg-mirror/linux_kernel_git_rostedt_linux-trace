@@ -14,6 +14,7 @@
 #include <linux/proc_fs.h>
 #include <linux/kernel.h>
 #include <linux/syscalls.h>
+#include <linux/stackprotector.h>
 #include <linux/string.h>
 #include <linux/ctype.h>
 #include <linux/delay.h>
@@ -62,6 +63,7 @@
 #include <linux/sched.h>
 #include <linux/signal.h>
 #include <linux/idr.h>
+#include <linux/kmemcheck.h>
 #include <linux/ftrace.h>
 
 #include <asm/io.h>
@@ -553,6 +555,12 @@ asmlinkage void __init start_kernel(void)
 	unwind_init();
 	lockdep_init();
 	debug_objects_early_init();
+
+	/*
+	 * Set up the the initial canary ASAP:
+	 */
+	boot_init_stack_canary();
+
 	cgroup_init_early();
 
 	local_irq_disable();
@@ -711,6 +719,7 @@ int do_one_initcall(initcall_t fn)
 		it.caller = task_pid_nr(current);
 		printk("calling  %pF @ %i\n", fn, it.caller);
 		it.calltime = ktime_get();
+		enable_boot_trace();
 	}
 
 	it.result = fn();
@@ -722,6 +731,7 @@ int do_one_initcall(initcall_t fn)
 		printk("initcall %pF returned %d after %Ld usecs\n", fn,
 			it.result, it.duration);
 		trace_boot(&it, fn);
+		disable_boot_trace();
 	}
 
 	msgbuf[0] = 0;
@@ -778,6 +788,9 @@ static void __init do_basic_setup(void)
 static void __init do_pre_smp_initcalls(void)
 {
 	initcall_t *call;
+
+	/* kmemcheck must initialize before all early initcalls: */
+	kmemcheck_init();
 
 	for (call = __initcall_start; call < __early_initcall_end; call++)
 		do_one_initcall(*call);
@@ -882,7 +895,7 @@ static int __init kernel_init(void * unused)
 	 * we're essentially up and running. Get rid of the
 	 * initmem segments and start the user-mode stuff..
 	 */
-	stop_boot_trace();
+
 	init_post();
 	return 0;
 }

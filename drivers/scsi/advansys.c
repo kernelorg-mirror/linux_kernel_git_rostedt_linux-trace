@@ -68,7 +68,9 @@
  *  7. advansys_info is not safe against multiple simultaneous callers
  *  8. Add module_param to override ISA/VLB ioport array
  */
-#warning this driver is still not properly converted to the DMA API
+#ifdef CONFIG_ALLOW_WARNINGS
+# warning this driver is still not properly converted to the DMA API
+#endif
 
 /* Enable driver /proc statistics. */
 #define ADVANSYS_STATS
@@ -13876,7 +13878,9 @@ static int __devinit advansys_board_found(struct Scsi_Host *shost,
 		free_dma(shost->dma_channel);
  err_free_proc:
 	kfree(boardp->prtbuf);
+#ifdef CONFIG_PROC_FS
  err_unmap:
+#endif
 	if (boardp->ioremap_addr)
 		iounmap(boardp->ioremap_addr);
  err_shost:

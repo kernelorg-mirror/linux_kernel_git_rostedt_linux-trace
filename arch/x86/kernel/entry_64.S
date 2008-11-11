@@ -68,6 +68,8 @@ ENTRY(mcount)
 END(mcount)
 
 ENTRY(ftrace_caller)
+	cmpl $0, function_trace_stop
+	jne  ftrace_stub
 
 	/* taken from glibc */
 	subq $0x38, %rsp
@@ -103,6 +105,9 @@ END(ftrace_caller)
 
 #else /* ! CONFIG_DYNAMIC_FTRACE */
 ENTRY(mcount)
+	cmpl $0, function_trace_stop
+	jne  ftrace_stub
+
 	cmpq $ftrace_stub, ftrace_trace_function
 	jnz trace
 .globl ftrace_stub
@@ -255,6 +260,7 @@ ENTRY(ret_from_fork)
 	call schedule_tail
 	GET_THREAD_INFO(%rcx)
 	testl $(_TIF_SYSCALL_TRACE|_TIF_SYSCALL_AUDIT),TI_flags(%rcx)
+	CFI_REMEMBER_STATE
 	jnz rff_trace
 rff_action:	
 	RESTORE_REST
@@ -264,6 +270,7 @@ rff_action:
 	jnz  int_ret_from_sys_call
 	RESTORE_TOP_OF_STACK %rdi,ARGOFFSET
 	jmp ret_from_sys_call
+	CFI_RESTORE_STATE
 rff_trace:
 	movq %rsp,%rdi
 	call syscall_trace_leave

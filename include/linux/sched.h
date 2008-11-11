@@ -247,6 +247,7 @@ extern void init_idle(struct task_struct *idle, int cpu);
 extern void init_idle_bootup_task(struct task_struct *idle);
 
 extern int runqueue_is_locked(void);
+extern void task_rq_unlock_wait(struct task_struct *p);
 
 extern cpumask_t nohz_cpu_mask;
 #if defined(CONFIG_SMP) && defined(CONFIG_NO_HZ)
@@ -1134,10 +1135,9 @@ struct task_struct {
 	pid_t pid;
 	pid_t tgid;
 
-#ifdef CONFIG_CC_STACKPROTECTOR
 	/* Canary value for the -fstack-protector gcc feature */
 	unsigned long stack_canary;
-#endif
+
 	/* 
 	 * pointers to (original) parent process, youngest child, younger sibling,
 	 * older sibling, respectively.  (p->father can be replaced with 
@@ -2022,6 +2022,19 @@ static inline int object_is_on_stack(void *obj)
 }
 
 extern void thread_info_cache_init(void);
+
+#ifdef CONFIG_DEBUG_STACK_USAGE
+static inline unsigned long stack_not_used(struct task_struct *p)
+{
+	unsigned long *n = end_of_stack(p);
+
+	do { 	/* Skip over canary */
+		n++;
+	} while (!*n);
+
+	return (unsigned long)n - (unsigned long)end_of_stack(p);
+}
+#endif
 
 /* set thread flags in other task's structures
  * - see asm/thread_info.h for TIF_xxxx flags available

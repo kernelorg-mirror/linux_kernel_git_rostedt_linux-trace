@@ -652,6 +652,7 @@ has_int_reg:
 
 	default:
 		BUG();
+		return -EINVAL;
 	}
 }
 

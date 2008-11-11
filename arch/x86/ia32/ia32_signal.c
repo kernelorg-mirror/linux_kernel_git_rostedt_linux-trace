@@ -367,12 +367,7 @@ static int ia32_setup_sigcontext(struct sigcontext_ia32 __user *sc,
 	err |= __put_user(regs->flags, &sc->flags);
 	err |= __put_user(regs->sp, &sc->sp_at_signal);
 
-	tmp = save_i387_xstate_ia32(fpstate);
-	if (tmp < 0)
-		err = -EFAULT;
-	else
-		err |= __put_user(ptr_to_compat(tmp ? fpstate : NULL),
-					&sc->fpstate);
+	err |= __put_user(ptr_to_compat(fpstate), &sc->fpstate);
 
 	/* non-iBCS2 extensions.. */
 	err |= __put_user(mask, &sc->oldmask);
@@ -408,6 +403,8 @@ static void __user *get_sigframe(struct k_sigaction *ka, struct pt_regs *regs,
 	if (used_math()) {
 		sp = sp - sig_xstate_ia32_size;
 		*fpstate = (struct _fpstate_ia32 *) sp;
+		if (save_i387_xstate_ia32(*fpstate) < 0)
+			return (void __user *) -1L;
 	}
 
 	sp -= frame_size;
@@ -566,11 +563,6 @@ int ia32_setup_rt_frame(int sig, struct k_sigaction *ka, siginfo_t *info,
 	/* Set up registers for signal handler */
 	regs->sp = (unsigned long) frame;
 	regs->ip = (unsigned long) ka->sa.sa_handler;
-
-	/* Make -mregparm=3 work */
-	regs->ax = sig;
-	regs->dx = (unsigned long) &frame->info;
-	regs->cx = (unsigned long) &frame->uc;
 
 	/* Make -mregparm=3 work */
 	regs->ax = sig;

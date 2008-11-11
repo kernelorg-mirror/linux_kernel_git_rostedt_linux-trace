@@ -399,7 +399,7 @@ struct cfs_rq {
 	 */
 	struct sched_entity *curr, *next, *last;
 
-	unsigned long nr_spread_over;
+	unsigned int nr_spread_over;
 
 #ifdef CONFIG_FAIR_GROUP_SCHED
 	struct rq *rq;	/* cpu runqueue to which this cfs_rq is attached */
@@ -703,45 +703,18 @@ static __read_mostly char *sched_feat_names[] = {
 
 #undef SCHED_FEAT
 
-static int sched_feat_open(struct inode *inode, struct file *filp)
+static int sched_feat_show(struct seq_file *m, void *v)
 {
-	filp->private_data = inode->i_private;
-	return 0;
-}
-
-static ssize_t
-sched_feat_read(struct file *filp, char __user *ubuf,
-		size_t cnt, loff_t *ppos)
-{
-	char *buf;
-	int r = 0;
-	int len = 0;
 	int i;
 
 	for (i = 0; sched_feat_names[i]; i++) {
-		len += strlen(sched_feat_names[i]);
-		len += 4;
+		if (!(sysctl_sched_features & (1UL << i)))
+			seq_puts(m, "NO_");
+		seq_printf(m, "%s ", sched_feat_names[i]);
 	}
+	seq_puts(m, "\n");
 
-	buf = kmalloc(len + 2, GFP_KERNEL);
-	if (!buf)
-		return -ENOMEM;
-
-	for (i = 0; sched_feat_names[i]; i++) {
-		if (sysctl_sched_features & (1UL << i))
-			r += sprintf(buf + r, "%s ", sched_feat_names[i]);
-		else
-			r += sprintf(buf + r, "NO_%s ", sched_feat_names[i]);
-	}
-
-	r += sprintf(buf + r, "\n");
-	WARN_ON(r >= len + 2);
-
-	r = simple_read_from_buffer(ubuf, cnt, ppos, buf, r);
-
-	kfree(buf);
-
-	return r;
+	return 0;
 }
 
 static ssize_t
@@ -786,10 +759,17 @@ sched_feat_write(struct file *filp, const char __user *ubuf,
 	return cnt;
 }
 
+static int sched_feat_open(struct inode *inode, struct file *filp)
+{
+	return single_open(filp, sched_feat_show, NULL);
+}
+
 static struct file_operations sched_feat_fops = {
-	.open	= sched_feat_open,
-	.read	= sched_feat_read,
-	.write	= sched_feat_write,
+	.open		= sched_feat_open,
+	.write		= sched_feat_write,
+	.read		= seq_read,
+	.llseek		= seq_lseek,
+	.release	= single_release,
 };
 
 static __init int sched_init_debug(void)
@@ -967,6 +947,14 @@ static struct rq *task_rq_lock(struct task_struct *p, unsigned long *flags)
 			return rq;
 		spin_unlock_irqrestore(&rq->lock, *flags);
 	}
+}
+
+void task_rq_unlock_wait(struct task_struct *p)
+{
+	struct rq *rq = task_rq(p);
+
+	smp_mb(); /* spin-unlock-wait is not a full memory barrier */
+	spin_unlock_wait(&rq->lock);
 }
 
 static void __task_rq_unlock(struct rq *rq)
@@ -2827,7 +2815,7 @@ static int double_lock_balance(struct rq *this_rq, struct rq *busiest)
 	return ret;
 }
 
-static void double_unlock_balance(struct rq *this_rq, struct rq *busiest)
+static inline void double_unlock_balance(struct rq *this_rq, struct rq *busiest)
 	__releases(busiest->lock)
 {
 	spin_unlock(&busiest->lock);
@@ -4328,7 +4316,7 @@ void __kprobes sub_preempt_count(int val)
 	/*
 	 * Underflow?
 	 */
-	if (DEBUG_LOCKS_WARN_ON(val > preempt_count()))
+       if (DEBUG_LOCKS_WARN_ON(val > preempt_count() - (!!kernel_locked())))
 		return;
 	/*
 	 * Is the spinlock portion underflowing?
@@ -5794,12 +5782,7 @@ void sched_show_task(struct task_struct *p)
 		printk(KERN_CONT " %016lx ", thread_saved_pc(p));
 #endif
 #ifdef CONFIG_DEBUG_STACK_USAGE
-	{
-		unsigned long *n = end_of_stack(p);
-		while (!*n)
-			n++;
-		free = (unsigned long)n - (unsigned long)end_of_stack(p);
-	}
+	free = stack_not_used(p);
 #endif
 	printk(KERN_CONT "%5lu %5d %6d\n", free,
 		task_pid_nr(p), task_pid_nr(p->real_parent));
@@ -6624,28 +6607,6 @@ early_initcall(migration_init);
 
 #ifdef CONFIG_SCHED_DEBUG
 
-static inline const char *sd_level_to_string(enum sched_domain_level lvl)
-{
-	switch (lvl) {
-	case SD_LV_NONE:
-			return "NONE";
-	case SD_LV_SIBLING:
-			return "SIBLING";
-	case SD_LV_MC:
-			return "MC";
-	case SD_LV_CPU:
-			return "CPU";
-	case SD_LV_NODE:
-			return "NODE";
-	case SD_LV_ALLNODES:
-			return "ALLNODES";
-	case SD_LV_MAX:
-			return "MAX";
-
-	}
-	return "MAX";
-}
-
 static int sched_domain_debug_one(struct sched_domain *sd, int cpu, int level,
 				  cpumask_t *groupmask)
 {
@@ -6665,8 +6626,7 @@ static int sched_domain_debug_one(struct sched_domain *sd, int cpu, int level,
 		return -1;
 	}
 
-	printk(KERN_CONT "span %s level %s\n",
-		str, sd_level_to_string(sd->level));
+	printk(KERN_CONT "span %s level %s\n", str, sd->name);
 
 	if (!cpu_isset(cpu, sd->span)) {
 		printk(KERN_ERR "ERROR: domain->span does not contain "
@@ -7322,13 +7282,21 @@ struct allmasks {
 };
 
 #if	NR_CPUS > 128
-#define	SCHED_CPUMASK_ALLOC		1
-#define	SCHED_CPUMASK_FREE(v)		kfree(v)
-#define	SCHED_CPUMASK_DECLARE(v)	struct allmasks *v
+#define SCHED_CPUMASK_DECLARE(v)	struct allmasks *v
+static inline void sched_cpumask_alloc(struct allmasks **masks)
+{
+	*masks = kmalloc(sizeof(**masks), GFP_KERNEL);
+}
+static inline void sched_cpumask_free(struct allmasks *masks)
+{
+	kfree(masks);
+}
 #else
-#define	SCHED_CPUMASK_ALLOC		0
-#define	SCHED_CPUMASK_FREE(v)
-#define	SCHED_CPUMASK_DECLARE(v)	struct allmasks _v, *v = &_v
+#define SCHED_CPUMASK_DECLARE(v)	struct allmasks _v, *v = &_v
+static inline void sched_cpumask_alloc(struct allmasks **masks)
+{ }
+static inline void sched_cpumask_free(struct allmasks *masks)
+{ }
 #endif
 
 #define	SCHED_CPUMASK_VAR(v, a) 	cpumask_t *v = (cpumask_t *) \
@@ -7404,9 +7372,8 @@ static int __build_sched_domains(const cpumask_t *cpu_map,
 		return -ENOMEM;
 	}
 
-#if SCHED_CPUMASK_ALLOC
 	/* get space for all scratch cpumask variables */
-	allmasks = kmalloc(sizeof(*allmasks), GFP_KERNEL);
+	sched_cpumask_alloc(&allmasks);
 	if (!allmasks) {
 		printk(KERN_WARNING "Cannot alloc cpumask array\n");
 		kfree(rd);
@@ -7415,7 +7382,7 @@ static int __build_sched_domains(const cpumask_t *cpu_map,
 #endif
 		return -ENOMEM;
 	}
-#endif
+
 	tmpmask = (cpumask_t *)allmasks;
 
 
@@ -7669,13 +7636,13 @@ static int __build_sched_domains(const cpumask_t *cpu_map,
 		cpu_attach_domain(sd, rd, i);
 	}
 
-	SCHED_CPUMASK_FREE((void *)allmasks);
+	sched_cpumask_free(allmasks);
 	return 0;
 
 #ifdef CONFIG_NUMA
 error:
 	free_sched_groups(cpu_map, tmpmask);
-	SCHED_CPUMASK_FREE((void *)allmasks);
+	sched_cpumask_free(allmasks);
 	kfree(rd);
 	return -ENOMEM;
 #endif
@@ -7738,8 +7705,6 @@ static void detach_destroy_domains(const cpumask_t *cpu_map)
 {
 	cpumask_t tmpmask;
 	int i;
-
-	unregister_sched_domain_sysctl();
 
 	for_each_cpu_mask_nr(i, *cpu_map)
 		cpu_attach_domain(NULL, &def_root_domain, i);
@@ -7817,7 +7782,7 @@ match1:
 		ndoms_cur = 0;
 		doms_new = &fallback_doms;
 		cpus_andnot(doms_new[0], cpu_online_map, cpu_isolated_map);
-		dattr_new = NULL;
+		WARN_ON_ONCE(dattr_new);
 	}
 
 	/* Build new domains */
@@ -8477,7 +8442,7 @@ static
 int alloc_fair_sched_group(struct task_group *tg, struct task_group *parent)
 {
 	struct cfs_rq *cfs_rq;
-	struct sched_entity *se, *parent_se;
+	struct sched_entity *se;
 	struct rq *rq;
 	int i;
 
@@ -8493,18 +8458,17 @@ int alloc_fair_sched_group(struct task_group *tg, struct task_group *parent)
 	for_each_possible_cpu(i) {
 		rq = cpu_rq(i);
 
-		cfs_rq = kmalloc_node(sizeof(struct cfs_rq),
-				GFP_KERNEL|__GFP_ZERO, cpu_to_node(i));
+		cfs_rq = kzalloc_node(sizeof(struct cfs_rq),
+				      GFP_KERNEL, cpu_to_node(i));
 		if (!cfs_rq)
 			goto err;
 
-		se = kmalloc_node(sizeof(struct sched_entity),
-				GFP_KERNEL|__GFP_ZERO, cpu_to_node(i));
+		se = kzalloc_node(sizeof(struct sched_entity),
+				  GFP_KERNEL, cpu_to_node(i));
 		if (!se)
 			goto err;
 
-		parent_se = parent ? parent->se[i] : NULL;
-		init_tg_cfs_entry(tg, cfs_rq, se, i, 0, parent_se);
+		init_tg_cfs_entry(tg, cfs_rq, se, i, 0, parent->se[i]);
 	}
 
 	return 1;
@@ -8565,7 +8529,7 @@ static
 int alloc_rt_sched_group(struct task_group *tg, struct task_group *parent)
 {
 	struct rt_rq *rt_rq;
-	struct sched_rt_entity *rt_se, *parent_se;
+	struct sched_rt_entity *rt_se;
 	struct rq *rq;
 	int i;
 
@@ -8582,18 +8546,17 @@ int alloc_rt_sched_group(struct task_group *tg, struct task_group *parent)
 	for_each_possible_cpu(i) {
 		rq = cpu_rq(i);
 
-		rt_rq = kmalloc_node(sizeof(struct rt_rq),
-				GFP_KERNEL|__GFP_ZERO, cpu_to_node(i));
+		rt_rq = kzalloc_node(sizeof(struct rt_rq),
+				     GFP_KERNEL, cpu_to_node(i));
 		if (!rt_rq)
 			goto err;
 
-		rt_se = kmalloc_node(sizeof(struct sched_rt_entity),
-				GFP_KERNEL|__GFP_ZERO, cpu_to_node(i));
+		rt_se = kzalloc_node(sizeof(struct sched_rt_entity),
+				     GFP_KERNEL, cpu_to_node(i));
 		if (!rt_se)
 			goto err;
 
-		parent_se = parent ? parent->rt_se[i] : NULL;
-		init_tg_rt_entry(tg, rt_rq, rt_se, i, 0, parent_se);
+		init_tg_rt_entry(tg, rt_rq, rt_se, i, 0, parent->rt_se[i]);
 	}
 
 	return 1;

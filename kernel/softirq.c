@@ -269,10 +269,11 @@ void irq_enter(void)
 {
 	int cpu = smp_processor_id();
 
-	if (idle_cpu(cpu) && !in_interrupt())
+	if (idle_cpu(cpu) && !in_interrupt()) {
+		__irq_enter();
 		tick_check_idle(cpu);
-
-	__irq_enter();
+	} else
+		__irq_enter();
 }
 
 #ifdef __ARCH_IRQ_EXIT_IRQS_DISABLED
@@ -372,6 +373,17 @@ void __tasklet_hi_schedule(struct tasklet_struct *t)
 }
 
 EXPORT_SYMBOL(__tasklet_hi_schedule);
+
+void __tasklet_hi_schedule_first(struct tasklet_struct *t)
+{
+	BUG_ON(!irqs_disabled());
+
+	t->next = __get_cpu_var(tasklet_hi_vec).head;
+	__get_cpu_var(tasklet_hi_vec).head = t;
+	__raise_softirq_irqoff(HI_SOFTIRQ);
+}
+
+EXPORT_SYMBOL(__tasklet_hi_schedule_first);
 
 static void tasklet_action(struct softirq_action *a)
 {
