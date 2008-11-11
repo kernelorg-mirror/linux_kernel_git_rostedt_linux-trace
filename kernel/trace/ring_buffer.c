@@ -16,6 +16,8 @@
 #include <linux/list.h>
 #include <linux/fs.h>
 
+#include "trace.h"
+
 /* Up this if you want to test the TIME_EXTENTS and normalization */
 #define DEBUG_SHIFT 0
 
@@ -152,7 +154,7 @@ static inline int test_time_stamp(u64 delta)
 struct ring_buffer_per_cpu {
 	int				cpu;
 	struct ring_buffer		*buffer;
-	spinlock_t			lock;
+	raw_spinlock_t			lock;
 	struct lock_class_key		lock_key;
 	struct list_head		pages;
 	struct buffer_page		*head_page;	/* read from head */
@@ -289,7 +291,7 @@ rb_allocate_cpu_buffer(struct ring_buffer *buffer, int cpu)
 
 	cpu_buffer->cpu = cpu;
 	cpu_buffer->buffer = buffer;
-	spin_lock_init(&cpu_buffer->lock);
+	cpu_buffer->lock = (raw_spinlock_t)__RAW_SPIN_LOCK_UNLOCKED;
 	INIT_LIST_HEAD(&cpu_buffer->pages);
 
 	page = kzalloc_node(ALIGN(sizeof(*page), cache_line_size()),
@@ -852,7 +854,8 @@ __rb_reserve_next(struct ring_buffer_per_cpu *cpu_buffer,
 	if (write > BUF_PAGE_SIZE) {
 		struct buffer_page *next_page = tail_page;
 
-		spin_lock_irqsave(&cpu_buffer->lock, flags);
+		local_irq_save(flags);
+		__raw_spin_lock(&cpu_buffer->lock);
 
 		rb_inc_page(cpu_buffer, &next_page);
 
@@ -928,7 +931,8 @@ __rb_reserve_next(struct ring_buffer_per_cpu *cpu_buffer,
 			rb_set_commit_to_write(cpu_buffer);
 		}
 
-		spin_unlock_irqrestore(&cpu_buffer->lock, flags);
+		__raw_spin_unlock(&cpu_buffer->lock);
+		local_irq_restore(flags);
 
 		/* fail and let the caller try again */
 		return ERR_PTR(-EAGAIN);
@@ -951,7 +955,8 @@ __rb_reserve_next(struct ring_buffer_per_cpu *cpu_buffer,
 	return event;
 
  out_unlock:
-	spin_unlock_irqrestore(&cpu_buffer->lock, flags);
+	__raw_spin_unlock(&cpu_buffer->lock);
+	local_irq_restore(flags);
 	return NULL;
 }
 
@@ -1137,8 +1142,7 @@ ring_buffer_lock_reserve(struct ring_buffer *buffer,
 		return NULL;
 
 	/* If we are tracing schedule, we don't want to recurse */
-	resched = need_resched();
-	preempt_disable_notrace();
+	resched = ftrace_preempt_disable();
 
 	cpu = raw_smp_processor_id();
 
@@ -1169,10 +1173,7 @@ ring_buffer_lock_reserve(struct ring_buffer *buffer,
 	return event;
 
  out:
-	if (resched)
-		preempt_enable_notrace();
-	else
-		preempt_enable_notrace();
+	ftrace_preempt_enable(resched);
 	return NULL;
 }
 
@@ -1214,12 +1215,9 @@ int ring_buffer_unlock_commit(struct ring_buffer *buffer,
 	/*
 	 * Only the last preempt count needs to restore preemption.
 	 */
-	if (preempt_count() == 1) {
-		if (per_cpu(rb_need_resched, cpu))
-			preempt_enable_no_resched_notrace();
-		else
-			preempt_enable_notrace();
-	} else
+	if (preempt_count() == 1)
+		ftrace_preempt_enable(per_cpu(rb_need_resched, cpu));
+	else
 		preempt_enable_no_resched_notrace();
 
 	return 0;
@@ -1252,8 +1250,7 @@ int ring_buffer_write(struct ring_buffer *buffer,
 	if (atomic_read(&buffer->record_disabled))
 		return -EBUSY;
 
-	resched = need_resched();
-	preempt_disable_notrace();
+	resched = ftrace_preempt_disable();
 
 	cpu = raw_smp_processor_id();
 
@@ -1279,10 +1276,7 @@ int ring_buffer_write(struct ring_buffer *buffer,
 
 	ret = 0;
  out:
-	if (resched)
-		preempt_enable_no_resched_notrace();
-	else
-		preempt_enable_notrace();
+	ftrace_preempt_enable(resched);
 
 	return ret;
 }
@@ -1549,7 +1543,8 @@ rb_get_reader_page(struct ring_buffer_per_cpu *cpu_buffer)
 	unsigned long flags;
 	int nr_loops = 0;
 
-	spin_lock_irqsave(&cpu_buffer->lock, flags);
+	local_irq_save(flags);
+	__raw_spin_lock(&cpu_buffer->lock);
 
  again:
 	/*
@@ -1611,7 +1606,8 @@ rb_get_reader_page(struct ring_buffer_per_cpu *cpu_buffer)
 	goto again;
 
  out:
-	spin_unlock_irqrestore(&cpu_buffer->lock, flags);
+	__raw_spin_unlock(&cpu_buffer->lock);
+	local_irq_restore(flags);
 
 	return reader;
 }
@@ -1880,9 +1876,11 @@ ring_buffer_read_start(struct ring_buffer *buffer, int cpu)
 	atomic_inc(&cpu_buffer->record_disabled);
 	synchronize_sched();
 
-	spin_lock_irqsave(&cpu_buffer->lock, flags);
+	local_irq_save(flags);
+	__raw_spin_lock(&cpu_buffer->lock);
 	ring_buffer_iter_reset(iter);
-	spin_unlock_irqrestore(&cpu_buffer->lock, flags);
+	__raw_spin_unlock(&cpu_buffer->lock);
+	local_irq_restore(flags);
 
 	return iter;
 }
@@ -1968,11 +1966,13 @@ void ring_buffer_reset_cpu(struct ring_buffer *buffer, int cpu)
 	if (!cpu_isset(cpu, buffer->cpumask))
 		return;
 
-	spin_lock_irqsave(&cpu_buffer->lock, flags);
+	local_irq_save(flags);
+	__raw_spin_lock(&cpu_buffer->lock);
 
 	rb_reset_cpu(cpu_buffer);
 
-	spin_unlock_irqrestore(&cpu_buffer->lock, flags);
+	__raw_spin_unlock(&cpu_buffer->lock);
+	local_irq_restore(flags);
 }
 
 /**

@@ -49,6 +49,7 @@ struct ftrace_entry {
 	unsigned long		parent_ip;
 };
 extern struct tracer boot_tracer;
+extern struct tracer sched_switch_trace; /* Used by the boot tracer */
 
 /*
  * Context switch trace entry - which task (and prio) we switched from/to:
@@ -236,11 +237,11 @@ struct tracer {
 	const char		*name;
 	void			(*init)(struct trace_array *tr);
 	void			(*reset)(struct trace_array *tr);
+	void			(*start)(struct trace_array *tr);
+	void			(*stop)(struct trace_array *tr);
 	void			(*open)(struct trace_iterator *iter);
 	void			(*pipe_open)(struct trace_iterator *iter);
 	void			(*close)(struct trace_iterator *iter);
-	void			(*start)(struct trace_iterator *iter);
-	void			(*stop)(struct trace_iterator *iter);
 	ssize_t			(*read)(struct trace_iterator *iter,
 					struct file *filp, char __user *ubuf,
 					size_t cnt, loff_t *ppos);
@@ -281,6 +282,7 @@ struct trace_iterator {
 	long			idx;
 };
 
+int tracing_is_enabled(void);
 void trace_wake_up(void);
 void tracing_reset(struct trace_array *tr, int cpu);
 int tracing_open_generic(struct inode *inode, struct file *filp);
@@ -415,8 +417,57 @@ enum trace_iterator_flags {
 	TRACE_ITER_STACKTRACE		= 0x100,
 	TRACE_ITER_SCHED_TREE		= 0x200,
 	TRACE_ITER_PRINTK		= 0x400,
+	TRACE_ITER_PREEMPTONLY		= 0x800,
 };
 
 extern struct tracer nop_trace;
+
+/**
+ * ftrace_preempt_disable - disable preemption scheduler safe
+ *
+ * When tracing can happen inside the scheduler, there exists
+ * cases that the tracing might happen before the need_resched
+ * flag is checked. If this happens and the tracer calls
+ * preempt_enable (after a disable), a schedule might take place
+ * causing an infinite recursion.
+ *
+ * To prevent this, we read the need_recshed flag before
+ * disabling preemption. When we want to enable preemption we
+ * check the flag, if it is set, then we call preempt_enable_no_resched.
+ * Otherwise, we call preempt_enable.
+ *
+ * The rational for doing the above is that if need resched is set
+ * and we have yet to reschedule, we are either in an atomic location
+ * (where we do not need to check for scheduling) or we are inside
+ * the scheduler and do not want to resched.
+ */
+static inline int ftrace_preempt_disable(void)
+{
+	int resched;
+
+	resched = need_resched();
+	preempt_disable_notrace();
+
+	return resched;
+}
+
+/**
+ * ftrace_preempt_enable - enable preemption scheduler safe
+ * @resched: the return value from ftrace_preempt_disable
+ *
+ * This is a scheduler safe way to enable preemption and not miss
+ * any preemption checks. The disabled saved the state of preemption.
+ * If resched is set, then we were either inside an atomic or
+ * are inside the scheduler (we would have already scheduled
+ * otherwise). In this case, we do not want to call normal
+ * preempt_enable, but preempt_enable_no_resched instead.
+ */
+static inline void ftrace_preempt_enable(int resched)
+{
+	if (resched)
+		preempt_enable_no_resched_notrace();
+	else
+		preempt_enable_notrace();
+}
 
 #endif /* _LINUX_KERNEL_TRACE_H */

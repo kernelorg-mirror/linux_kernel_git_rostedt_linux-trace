@@ -17,8 +17,7 @@ static inline unsigned long ftrace_call_adjust(unsigned long addr)
 	 */
 	return addr - 1;
 }
-#endif
-
+#endif /* __ASSEMBLY__ */
 #endif /* CONFIG_FUNCTION_TRACER */
 
 #endif /* _ASM_X86_FTRACE_H */
