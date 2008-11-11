@@ -49,7 +49,6 @@ struct ftrace_entry {
 	unsigned long		parent_ip;
 };
 extern struct tracer boot_tracer;
-extern struct tracer sched_switch_trace; /* Used by the boot tracer */
 
 /*
  * Context switch trace entry - which task (and prio) we switched from/to:
@@ -173,7 +172,6 @@ struct trace_iterator;
 struct trace_array {
 	struct ring_buffer	*buffer;
 	unsigned long		entries;
-	long			ctrl;
 	int			cpu;
 	cycle_t			time_start;
 	struct task_struct	*waiter;
@@ -245,7 +243,6 @@ struct tracer {
 	ssize_t			(*read)(struct trace_iterator *iter,
 					struct file *filp, char __user *ubuf,
 					size_t cnt, loff_t *ppos);
-	void			(*ctrl_update)(struct trace_array *tr);
 #ifdef CONFIG_FTRACE_STARTUP_TEST
 	int			(*selftest)(struct tracer *trace,
 					    struct trace_array *tr);
@@ -280,6 +277,8 @@ struct trace_iterator {
 	unsigned long		iter_flags;
 	loff_t			pos;
 	long			idx;
+
+	cpumask_t		started;
 };
 
 int tracing_is_enabled(void);
@@ -325,6 +324,9 @@ void trace_function(struct trace_array *tr,
 
 void tracing_start_cmdline_record(void);
 void tracing_stop_cmdline_record(void);
+void tracing_sched_switch_assign_trace(struct trace_array *tr);
+void tracing_stop_sched_switch_record(void);
+void tracing_start_sched_switch_record(void);
 int register_tracer(struct tracer *type);
 void unregister_tracer(struct tracer *type);
 

@@ -44,22 +44,12 @@ static void stop_function_trace(struct trace_array *tr)
 
 static void function_trace_init(struct trace_array *tr)
 {
-	if (tr->ctrl)
-		start_function_trace(tr);
+	start_function_trace(tr);
 }
 
 static void function_trace_reset(struct trace_array *tr)
 {
-	if (tr->ctrl)
-		stop_function_trace(tr);
-}
-
-static void function_trace_ctrl_update(struct trace_array *tr)
-{
-	if (tr->ctrl)
-		start_function_trace(tr);
-	else
-		stop_function_trace(tr);
+	stop_function_trace(tr);
 }
 
 static void function_trace_start(struct trace_array *tr)
@@ -73,7 +63,6 @@ static struct tracer function_trace __read_mostly =
 	.init	     = function_trace_init,
 	.reset	     = function_trace_reset,
 	.start	     = function_trace_start,
-	.ctrl_update = function_trace_ctrl_update,
 #ifdef CONFIG_FTRACE_SELFTEST
 	.selftest    = trace_selftest_startup_function,
 #endif

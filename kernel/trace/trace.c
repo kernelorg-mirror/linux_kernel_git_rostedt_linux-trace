@@ -205,7 +205,7 @@ static DEFINE_MUTEX(trace_types_lock);
 static DECLARE_WAIT_QUEUE_HEAD(trace_wait);
 
 /* trace_flags holds iter_ctrl options */
-unsigned long trace_flags = TRACE_ITER_PRINT_PARENT;
+unsigned long trace_flags = TRACE_ITER_PRINT_PARENT | TRACE_ITER_PRINTK;
 
 /**
  * trace_wake_up - wake up tasks waiting for trace input
@@ -537,7 +537,6 @@ int register_tracer(struct tracer *type)
 	if (type->selftest) {
 		struct tracer *saved_tracer = current_trace;
 		struct trace_array *tr = &global_trace;
-		int saved_ctrl = tr->ctrl;
 		int i;
 		/*
 		 * Run a selftest on this tracer.
@@ -550,13 +549,11 @@ int register_tracer(struct tracer *type)
 			tracing_reset(tr, i);
 		}
 		current_trace = type;
-		tr->ctrl = 0;
 		/* the test is responsible for initializing and enabling */
 		pr_info("Testing tracer %s: ", type->name);
 		ret = type->selftest(type, tr);
 		/* the test is responsible for resetting too */
 		current_trace = saved_tracer;
-		tr->ctrl = saved_ctrl;
 		if (ret) {
 			printk(KERN_CONT "FAILED!\n");
 			goto out;
@@ -966,7 +963,7 @@ ftrace_special(unsigned long arg1, unsigned long arg2, unsigned long arg3)
 	int cpu;
 	int pc;
 
-	if (tracing_disabled || !tr->ctrl)
+	if (tracing_disabled)
 		return;
 
 	pc = preempt_count();
@@ -1481,6 +1478,17 @@ void trace_seq_print_cont(struct trace_seq *s, struct trace_iterator *iter)
 		trace_seq_putc(s, '\n');
 }
 
+static void test_cpu_buff_start(struct trace_iterator *iter)
+{
+	struct trace_seq *s = &iter->seq;
+
+	if (cpu_isset(iter->cpu, iter->started))
+		return;
+
+	cpu_set(iter->cpu, iter->started);
+	trace_seq_printf(s, "##### CPU %u buffer started ####\n", iter->cpu);
+}
+
 static enum print_line_t
 print_lat_fmt(struct trace_iterator *iter, unsigned int trace_idx, int cpu)
 {
@@ -1499,6 +1507,8 @@ print_lat_fmt(struct trace_iterator *iter, unsigned int trace_idx, int cpu)
 
 	if (entry->type == TRACE_CONT)
 		return TRACE_TYPE_HANDLED;
+
+	test_cpu_buff_start(iter);
 
 	next_entry = find_next_entry(iter, NULL, &next_ts);
 	if (!next_entry)
@@ -1614,6 +1624,8 @@ static enum print_line_t print_trace_fmt(struct trace_iterator *iter)
 
 	if (entry->type == TRACE_CONT)
 		return TRACE_TYPE_HANDLED;
+
+	test_cpu_buff_start(iter);
 
 	comm = trace_find_cmdline(iter->ent->pid);
 
@@ -2634,6 +2646,10 @@ static int tracing_open_pipe(struct inode *inode, struct file *filp)
 		return -ENOMEM;
 
 	mutex_lock(&trace_types_lock);
+
+	/* trace pipe does not show start of buffer */
+	cpus_setall(iter->started);
+
 	iter->tr = &global_trace;
 	iter->trace = current_trace;
 	filp->private_data = iter;
@@ -2820,7 +2836,6 @@ tracing_entries_write(struct file *filp, const char __user *ubuf,
 	unsigned long val;
 	char buf[64];
 	int ret, cpu;
-	struct trace_array *tr = filp->private_data;
 
 	if (cnt >= sizeof(buf))
 		return -EINVAL;
@@ -2840,12 +2855,7 @@ tracing_entries_write(struct file *filp, const char __user *ubuf,
 
 	mutex_lock(&trace_types_lock);
 
-	if (tr->ctrl) {
-		cnt = -EBUSY;
-		pr_info("ftrace: please disable tracing"
-			" before modifying buffer size\n");
-		goto out;
-	}
+	tracing_stop();
 
 	/* disable all cpu buffers */
 	for_each_tracing_cpu(cpu) {
@@ -2893,6 +2903,7 @@ tracing_entries_write(struct file *filp, const char __user *ubuf,
 			atomic_dec(&max_tr.data[cpu]->disabled);
 	}
 
+	tracing_start();
 	max_tr.entries = global_trace.entries;
 	mutex_unlock(&trace_types_lock);
 
@@ -2915,9 +2926,8 @@ tracing_mark_write(struct file *filp, const char __user *ubuf,
 {
 	char *buf;
 	char *end;
-	struct trace_array *tr = &global_trace;
 
-	if (!tr->ctrl || tracing_disabled)
+	if (tracing_disabled)
 		return -EINVAL;
 
 	if (cnt > TRACE_BUF_SIZE)
@@ -3146,7 +3156,7 @@ int trace_vprintk(unsigned long ip, const char *fmt, va_list args)
 	unsigned long flags, irq_flags;
 	int cpu, len = 0, size, pc;
 
-	if (!tr->ctrl || tracing_disabled)
+	if (tracing_disabled)
 		return 0;
 
 	pc = preempt_count();
@@ -3372,8 +3382,6 @@ __init static int tracer_alloc_buffers(void)
 
 	register_tracer(&nop_trace);
 #ifdef CONFIG_BOOT_TRACER
-	/* We don't want to launch sched_switch tracer yet */
-	global_trace.ctrl = 0;
 	register_tracer(&boot_tracer);
 	current_trace = &boot_tracer;
 	current_trace->init(&global_trace);
@@ -3382,7 +3390,6 @@ __init static int tracer_alloc_buffers(void)
 #endif
 
 	/* All seems OK, enable tracing */
-	global_trace.ctrl = 1;
 	tracing_disabled = 0;
 
 	atomic_notifier_chain_register(&panic_notifier_list,
