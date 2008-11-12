@@ -69,6 +69,7 @@ enum {
 enum {
 	STAC_92HD73XX_REF,
 	STAC_DELL_M6,
+	STAC_DELL_EQ,
 	STAC_92HD73XX_MODELS
 };
 
@@ -211,7 +212,7 @@ struct sigmatel_spec {
 	/* i/o switches */
 	unsigned int io_switch[2];
 	unsigned int clfe_swap;
-	unsigned int hp_switch;
+	unsigned int hp_switch; /* NID of HP as line-out */
 	unsigned int aloopback;
 
 	struct hda_pcm pcm_rec[2];	/* PCM information */
@@ -773,9 +774,7 @@ static struct hda_verb dell_eq_core_init[] = {
 };
 
 static struct hda_verb dell_m6_core_init[] = {
-	/* set master volume to max value without distortion
-	 * and direct control */
-	{ 0x1f, AC_VERB_SET_VOLUME_KNOB_CONTROL, 0xec},
+	{ 0x1f, AC_VERB_SET_VOLUME_KNOB_CONTROL, 0xff},
 	/* setup audio connections */
 	{ 0x0d, AC_VERB_SET_CONNECT_SEL, 0x00},
 	{ 0x0a, AC_VERB_SET_CONNECT_SEL, 0x01},
@@ -1600,11 +1599,13 @@ static unsigned int dell_m6_pin_configs[13] = {
 static unsigned int *stac92hd73xx_brd_tbl[STAC_92HD73XX_MODELS] = {
 	[STAC_92HD73XX_REF]	= ref92hd73xx_pin_configs,
 	[STAC_DELL_M6]	= dell_m6_pin_configs,
+	[STAC_DELL_EQ]	= dell_m6_pin_configs,
 };
 
 static const char *stac92hd73xx_models[STAC_92HD73XX_MODELS] = {
 	[STAC_92HD73XX_REF] = "ref",
 	[STAC_DELL_M6] = "dell-m6",
+	[STAC_DELL_EQ] = "dell-eq",
 };
 
 static struct snd_pci_quirk stac92hd73xx_cfg_tbl[] = {
@@ -2442,7 +2443,7 @@ static int stac92xx_hp_switch_get(struct snd_kcontrol *kcontrol,
 	struct hda_codec *codec = snd_kcontrol_chip(kcontrol);
 	struct sigmatel_spec *spec = codec->spec;
 
-	ucontrol->value.integer.value[0] = spec->hp_switch;
+	ucontrol->value.integer.value[0] = !!spec->hp_switch;
 	return 0;
 }
 
@@ -2451,8 +2452,9 @@ static int stac92xx_hp_switch_put(struct snd_kcontrol *kcontrol,
 {
 	struct hda_codec *codec = snd_kcontrol_chip(kcontrol);
 	struct sigmatel_spec *spec = codec->spec;
-
-	spec->hp_switch = ucontrol->value.integer.value[0];
+	int nid = kcontrol->private_value;
+ 
+	spec->hp_switch = ucontrol->value.integer.value[0] ? nid : 0;
 
 	/* check to be sure that the ports are upto date with
 	 * switch changes
@@ -2861,7 +2863,8 @@ static int stac92xx_auto_create_multi_out_ctls(struct hda_codec *codec,
 	if (cfg->hp_outs > 1) {
 		err = stac92xx_add_control(spec,
 			STAC_CTL_WIDGET_HP_SWITCH,
-			"Headphone as Line Out Switch", 0);
+			"Headphone as Line Out Switch",
+			cfg->hp_pins[cfg->hp_outs - 1]);
 		if (err < 0)
 			return err;
 	}
@@ -3529,6 +3532,12 @@ static int stac9200_parse_auto_config(struct hda_codec *codec)
 	if ((err = stac9200_auto_create_lfe_ctls(codec, &spec->autocfg)) < 0)
 		return err;
 
+	if (spec->num_muxes > 0) {
+		err = stac92xx_auto_create_mux_input_ctls(codec);
+		if (err < 0)
+			return err;
+	}
+
 	if (spec->autocfg.dig_out_pin)
 		spec->multiout.dig_out_nid = 0x05;
 	if (spec->autocfg.dig_in_pin)
@@ -3646,14 +3655,18 @@ static int stac92xx_init(struct hda_codec *codec)
 	for (i = 0; i < AUTO_PIN_LAST; i++) {
 		hda_nid_t nid = cfg->input_pins[i];
 		if (nid) {
-			unsigned int pinctl = snd_hda_codec_read(codec, nid,
-				0, AC_VERB_GET_PIN_WIDGET_CONTROL, 0);
-			/* if PINCTL already set then skip */
-			if (pinctl & AC_PINCAP_IN)
-				continue;
-			pinctl = AC_PINCTL_IN_EN;
-			if (i == AUTO_PIN_MIC || i == AUTO_PIN_FRONT_MIC)
-				pinctl |= stac92xx_get_vref(codec, nid);
+			unsigned int pinctl;
+			if (i == AUTO_PIN_MIC || i == AUTO_PIN_FRONT_MIC) {
+				/* for mic pins, force to initialize */
+				pinctl = stac92xx_get_vref(codec, nid);
+			} else {
+				pinctl = snd_hda_codec_read(codec, nid, 0,
+					AC_VERB_GET_PIN_WIDGET_CONTROL, 0);
+				/* if PINCTL already set then skip */
+				if (pinctl & AC_PINCTL_IN_EN)
+					continue;
+			}
+			pinctl |= AC_PINCTL_IN_EN;
 			stac92xx_auto_set_pinctl(codec, nid, pinctl);
 		}
 	}
@@ -3775,11 +3788,30 @@ static int get_hp_pin_presence(struct hda_codec *codec, hda_nid_t nid)
 	return 0;
 }
 
+/* return non-zero if the hp-pin of the given array index isn't
+ * a jack-detection target
+ */
+static int no_hp_sensing(struct sigmatel_spec *spec, int i)
+{
+	struct auto_pin_cfg *cfg = &spec->autocfg;
+
+	/* ignore sensing of shared line and mic jacks */
+	if (spec->line_switch &&
+	    cfg->hp_pins[i] == cfg->input_pins[AUTO_PIN_LINE])
+		return 1;
+	if (spec->mic_switch &&
+	    cfg->hp_pins[i] == cfg->input_pins[AUTO_PIN_MIC])
+		return 1;
+	/* ignore if the pin is set as line-out */
+	if (cfg->hp_pins[i] == spec->hp_switch)
+		return 1;
+	return 0;
+}
+
 static void stac92xx_hp_detect(struct hda_codec *codec, unsigned int res)
 {
 	struct sigmatel_spec *spec = codec->spec;
 	struct auto_pin_cfg *cfg = &spec->autocfg;
-	int nid = cfg->hp_pins[cfg->hp_outs - 1];
 	int i, presence;
 
 	presence = 0;
@@ -3790,15 +3822,16 @@ static void stac92xx_hp_detect(struct hda_codec *codec, unsigned int res)
 	for (i = 0; i < cfg->hp_outs; i++) {
 		if (presence)
 			break;
-		if (spec->hp_switch && cfg->hp_pins[i] == nid)
-			break;
+		if (no_hp_sensing(spec, i))
+			continue;
 		presence = get_hp_pin_presence(codec, cfg->hp_pins[i]);
 	}
 
 	if (presence) {
-		/* disable lineouts, enable hp */
+		/* disable lineouts */
 		if (spec->hp_switch)
-			stac92xx_reset_pinctl(codec, nid, AC_PINCTL_OUT_EN);
+			stac92xx_reset_pinctl(codec, spec->hp_switch,
+					      AC_PINCTL_OUT_EN);
 		for (i = 0; i < cfg->line_outs; i++)
 			stac92xx_reset_pinctl(codec, cfg->line_out_pins[i],
 						AC_PINCTL_OUT_EN);
@@ -3810,9 +3843,10 @@ static void stac92xx_hp_detect(struct hda_codec *codec, unsigned int res)
 				spec->gpio_dir, spec->gpio_data &
 				~spec->eapd_mask);
 	} else {
-		/* enable lineouts, disable hp */
+		/* enable lineouts */
 		if (spec->hp_switch)
-			stac92xx_set_pinctl(codec, nid, AC_PINCTL_OUT_EN);
+			stac92xx_set_pinctl(codec, spec->hp_switch,
+					    AC_PINCTL_OUT_EN);
 		for (i = 0; i < cfg->line_outs; i++)
 			stac92xx_set_pinctl(codec, cfg->line_out_pins[i],
 						AC_PINCTL_OUT_EN);
@@ -3824,8 +3858,16 @@ static void stac92xx_hp_detect(struct hda_codec *codec, unsigned int res)
 				spec->gpio_dir, spec->gpio_data |
 				spec->eapd_mask);
 	}
-	if (!spec->hp_switch && cfg->hp_outs > 1 && presence)
-		stac92xx_set_pinctl(codec, nid, AC_PINCTL_OUT_EN);
+	/* toggle hp outs */
+	for (i = 0; i < cfg->hp_outs; i++) {
+		unsigned int val = AC_PINCTL_OUT_EN | AC_PINCTL_HP_EN;
+		if (no_hp_sensing(spec, i))
+			continue;
+		if (presence)
+			stac92xx_set_pinctl(codec, cfg->hp_pins[i], val);
+		else
+			stac92xx_reset_pinctl(codec, cfg->hp_pins[i], val);
+	}
 } 
 
 static void stac92xx_pin_sense(struct hda_codec *codec, int idx)
@@ -4131,12 +4173,17 @@ again:
 			sizeof(stac92hd73xx_dmux));
 
 	switch (spec->board_config) {
-	case STAC_DELL_M6:
+	case STAC_DELL_EQ:
 		spec->init = dell_eq_core_init;
+		/* fallthru */
+	case STAC_DELL_M6:
 		spec->num_smuxes = 0;
 		spec->mixer = &stac92hd73xx_6ch_mixer[DELL_M6_MIXER];
 		spec->amp_nids = &stac92hd73xx_amp_nids[DELL_M6_AMP];
 		spec->num_amps = 1;
+
+		if (!spec->init)
+			spec->init = dell_m6_core_init;
 		switch (codec->subsystem_id) {
 		case 0x1028025e: /* Analog Mics */
 		case 0x1028025f:
@@ -4146,8 +4193,6 @@ again:
 			break;
 		case 0x10280271: /* Digital Mics */
 		case 0x10280272:
-			spec->init = dell_m6_core_init;
-			/* fall-through */
 		case 0x10280254:
 		case 0x10280255:
 			stac92xx_set_config_reg(codec, 0x13, 0x90A60160);
