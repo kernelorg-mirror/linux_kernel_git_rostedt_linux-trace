@@ -664,8 +664,7 @@ static inline int hrtimer_enqueue_reprogram(struct hrtimer *timer,
 
 		/* Timer is expired, act upon the callback mode */
 		switch(timer->cb_mode) {
-		case HRTIMER_CB_IRQSAFE_PERCPU:
-		case HRTIMER_CB_IRQSAFE_UNLOCKED:
+		case HRTIMER_CB_IRQSAFE:
 			/*
 			 * This is solely for the sched tick emulation with
 			 * dynamic tick support to ensure that we do not
@@ -1200,7 +1199,6 @@ static void run_hrtimer_pending(struct hrtimer_cpu_base *cpu_base)
 		enum hrtimer_restart (*fn)(struct hrtimer *);
 		struct hrtimer *timer;
 		int restart;
-		int emulate_hardirq_ctx = 0;
 
 		timer = list_entry(cpu_base->cb_pending.next,
 				   struct hrtimer, cb_entry);
@@ -1209,19 +1207,16 @@ static void run_hrtimer_pending(struct hrtimer_cpu_base *cpu_base)
 		timer_stats_account_hrtimer(timer);
 
 		fn = timer->function;
+
+		__remove_hrtimer(timer, timer->base, HRTIMER_STATE_CALLBACK, 0);
+		spin_unlock_irq(&cpu_base->lock);
+
 		/*
 		 * A timer might have been added to the cb_pending list
 		 * when it was migrated during a cpu-offline operation.
 		 * Emulate hardirq context for such timers.
 		 */
-		if (timer->cb_mode == HRTIMER_CB_IRQSAFE_PERCPU ||
-		    timer->cb_mode == HRTIMER_CB_IRQSAFE_UNLOCKED)
-			emulate_hardirq_ctx = 1;
-
-		__remove_hrtimer(timer, timer->base, HRTIMER_STATE_CALLBACK, 0);
-		spin_unlock_irq(&cpu_base->lock);
-
-		if (unlikely(emulate_hardirq_ctx)) {
+		if (timer->cb_mode == HRTIMER_CB_IRQSAFE) {
 			local_irq_disable();
 			restart = fn(timer);
 			local_irq_enable();
@@ -1229,7 +1224,6 @@ static void run_hrtimer_pending(struct hrtimer_cpu_base *cpu_base)
 			restart = fn(timer);
 
 		spin_lock_irq(&cpu_base->lock);
-
 		timer->state &= ~HRTIMER_STATE_CALLBACK;
 		if (restart == HRTIMER_RESTART) {
 			BUG_ON(hrtimer_active(timer));
@@ -1273,8 +1267,7 @@ static void __run_hrtimer(struct hrtimer *timer)
 	timer_stats_account_hrtimer(timer);
 
 	fn = timer->function;
-	if (timer->cb_mode == HRTIMER_CB_IRQSAFE_PERCPU ||
-	    timer->cb_mode == HRTIMER_CB_IRQSAFE_UNLOCKED) {
+	if (timer->cb_mode == HRTIMER_CB_IRQSAFE) {
 		/*
 		 * Used for scheduler timers, avoid lock inversion with
 		 * rq->lock and tasklist_lock.
@@ -1517,7 +1510,7 @@ void hrtimer_init_sleeper(struct hrtimer_sleeper *sl, struct task_struct *task)
 	sl->timer.function = hrtimer_wakeup;
 	sl->task = task;
 #ifdef CONFIG_HIGH_RES_TIMERS
-	sl->timer.cb_mode = HRTIMER_CB_IRQSAFE_UNLOCKED;
+	sl->timer.cb_mode = HRTIMER_CB_IRQSAFE;
 #endif
 }
 
@@ -1674,18 +1667,6 @@ static int migrate_hrtimer_list(struct hrtimer_clock_base *old_base,
 		debug_hrtimer_deactivate(timer);
 
 		/*
-		 * Should not happen. Per CPU timers should be
-		 * canceled _before_ the migration code is called
-		 */
-		if (timer->cb_mode == HRTIMER_CB_IRQSAFE_PERCPU) {
-			__remove_hrtimer(timer, old_base,
-					 HRTIMER_STATE_INACTIVE, 0);
-			WARN(1, "hrtimer (%p %p)active but cpu %d dead\n",
-			     timer, timer->function, dcpu);
-			continue;
-		}
-
-		/*
 		 * Mark it as STATE_MIGRATE not INACTIVE otherwise the
 		 * timer could be seen as !active and just vanish away
 		 * under us on another CPU
@@ -1701,7 +1682,7 @@ static int migrate_hrtimer_list(struct hrtimer_clock_base *old_base,
 		/*
 		 * Happens with high res enabled when the timer was
 		 * already expired and the callback mode is
-		 * HRTIMER_CB_IRQSAFE_UNLOCKED (hrtimer_sleeper). The
+		 * HRTIMER_CB_IRQSAFE (hrtimer_sleeper). The
 		 * enqueue code does not move them to the soft irq
 		 * pending list for performance/latency reasons, but
 		 * in the migration state, we need to do that
