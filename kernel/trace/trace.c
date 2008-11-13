@@ -95,20 +95,6 @@ static struct trace_array	global_trace;
 
 static DEFINE_PER_CPU(struct trace_array_cpu, global_trace_cpu);
 
-/*
- * The max_tr is used to snapshot the global_trace when a maximum
- * latency is reached. Some tracers will use this to store a maximum
- * trace while it continues examining live traces.
- *
- * The buffers for the max_tr are set up the same as the global_trace.
- * When a snapshot is taken, the link list of the max_tr is swapped
- * with the link list of the global_trace and the buffers are reset for
- * the global_trace so the tracing can continue.
- */
-static struct trace_array	max_tr;
-
-static DEFINE_PER_CPU(struct trace_array_cpu, max_data);
-
 /* tracer_enabled is used to toggle activation of a tracer */
 static int			tracer_enabled = 1;
 
@@ -229,6 +215,21 @@ static raw_spinlock_t ftrace_max_lock =
 	(raw_spinlock_t)__RAW_SPIN_LOCK_UNLOCKED;
 
 /*
+ * The max_tr is used to snapshot the global_trace when a maximum
+ * latency is reached. Some tracers will use this to store a maximum
+ * trace while it continues examining live traces.
+ *
+ * The buffers for the max_tr are set up the same as the global_trace.
+ * When a snapshot is taken, the link list of the max_tr is swapped
+ * with the link list of the global_trace and the buffers are reset for
+ * the global_trace so the tracing can continue.
+ */
+static struct trace_array	max_tr;
+
+static DEFINE_PER_CPU(struct trace_array_cpu, max_data);
+
+#ifdef CONFIG_TRACER_MAX_TRACE
+/*
  * Copy the new maximum trace into the separate maximum-trace
  * structure. (this way the maximum trace is permanently saved,
  * for later retrieval via /debugfs/tracing/latency_trace)
@@ -254,6 +255,65 @@ __update_max_tr(struct trace_array *tr, struct task_struct *tsk, int cpu)
 	/* record this tasks comm */
 	tracing_record_cmdline(current);
 }
+
+/**
+ * update_max_tr - snapshot all trace buffers from global_trace to max_tr
+ * @tr: tracer
+ * @tsk: the task with the latency
+ * @cpu: The cpu that initiated the trace.
+ *
+ * Flip the buffers between the @tr and the max_tr and record information
+ * about which task was the cause of this latency.
+ */
+void
+update_max_tr(struct trace_array *tr, struct task_struct *tsk, int cpu)
+{
+	struct ring_buffer *buf = tr->buffer;
+
+	WARN_ON_ONCE(!irqs_disabled());
+	__raw_spin_lock(&ftrace_max_lock);
+
+	tr->buffer = max_tr.buffer;
+	max_tr.buffer = buf;
+
+	ftrace_disable_cpu();
+	ring_buffer_reset(tr->buffer);
+	ftrace_enable_cpu();
+
+	__update_max_tr(tr, tsk, cpu);
+	__raw_spin_unlock(&ftrace_max_lock);
+}
+
+/**
+ * update_max_tr_single - only copy one trace over, and reset the rest
+ * @tr - tracer
+ * @tsk - task with the latency
+ * @cpu - the cpu of the buffer to copy.
+ *
+ * Flip the trace of a single CPU buffer between the @tr and the max_tr.
+ */
+void
+update_max_tr_single(struct trace_array *tr, struct task_struct *tsk, int cpu)
+{
+	int ret;
+
+	WARN_ON_ONCE(!irqs_disabled());
+	__raw_spin_lock(&ftrace_max_lock);
+
+	ftrace_disable_cpu();
+
+	ring_buffer_reset(max_tr.buffer);
+	ret = ring_buffer_swap_cpu(max_tr.buffer, tr->buffer, cpu);
+
+	ftrace_enable_cpu();
+
+	WARN_ON_ONCE(ret);
+
+	__update_max_tr(tr, tsk, cpu);
+	__raw_spin_unlock(&ftrace_max_lock);
+}
+
+#endif /* CONFIG_TRACER_MAX_TRACE */
 
 /**
  * trace_seq_printf - sequence printing of trace information
@@ -394,63 +454,6 @@ trace_print_seq(struct seq_file *m, struct trace_seq *s)
 	seq_puts(m, s->buffer);
 
 	trace_seq_reset(s);
-}
-
-/**
- * update_max_tr - snapshot all trace buffers from global_trace to max_tr
- * @tr: tracer
- * @tsk: the task with the latency
- * @cpu: The cpu that initiated the trace.
- *
- * Flip the buffers between the @tr and the max_tr and record information
- * about which task was the cause of this latency.
- */
-void
-update_max_tr(struct trace_array *tr, struct task_struct *tsk, int cpu)
-{
-	struct ring_buffer *buf = tr->buffer;
-
-	WARN_ON_ONCE(!irqs_disabled());
-	__raw_spin_lock(&ftrace_max_lock);
-
-	tr->buffer = max_tr.buffer;
-	max_tr.buffer = buf;
-
-	ftrace_disable_cpu();
-	ring_buffer_reset(tr->buffer);
-	ftrace_enable_cpu();
-
-	__update_max_tr(tr, tsk, cpu);
-	__raw_spin_unlock(&ftrace_max_lock);
-}
-
-/**
- * update_max_tr_single - only copy one trace over, and reset the rest
- * @tr - tracer
- * @tsk - task with the latency
- * @cpu - the cpu of the buffer to copy.
- *
- * Flip the trace of a single CPU buffer between the @tr and the max_tr.
- */
-void
-update_max_tr_single(struct trace_array *tr, struct task_struct *tsk, int cpu)
-{
-	int ret;
-
-	WARN_ON_ONCE(!irqs_disabled());
-	__raw_spin_lock(&ftrace_max_lock);
-
-	ftrace_disable_cpu();
-
-	ring_buffer_reset(max_tr.buffer);
-	ret = ring_buffer_swap_cpu(max_tr.buffer, tr->buffer, cpu);
-
-	ftrace_enable_cpu();
-
-	WARN_ON_ONCE(ret);
-
-	__update_max_tr(tr, tsk, cpu);
-	__raw_spin_unlock(&ftrace_max_lock);
 }
 
 /**
@@ -2719,19 +2722,21 @@ tracing_entries_write(struct file *filp, const char __user *ubuf,
 			goto out;
 		}
 
-		ret = ring_buffer_resize(max_tr.buffer, val);
-		if (ret < 0) {
-			int r;
-			cnt = ret;
-			r = ring_buffer_resize(global_trace.buffer,
-					       global_trace.entries);
-			if (r < 0) {
-				/* AARGH! We are left with different
-				 * size max buffer!!!! */
-				WARN_ON(1);
-				tracing_disabled = 1;
+		if (max_tr.buffer) {
+			ret = ring_buffer_resize(max_tr.buffer, val);
+			if (ret < 0) {
+				int r;
+				cnt = ret;
+				r = ring_buffer_resize(global_trace.buffer,
+						       global_trace.entries);
+				if (r < 0) {
+					/* AARGH! We are left with different
+					 * size max buffer!!!! */
+					WARN_ON(1);
+					tracing_disabled = 1;
+				}
+				goto out;
 			}
-			goto out;
 		}
 
 		global_trace.entries = val;
