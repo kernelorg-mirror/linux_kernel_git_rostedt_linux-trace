@@ -119,34 +119,18 @@ static int test_24bit_addr(unsigned long ip, unsigned long addr)
 	return !(diff & ((unsigned long)-1 << 24));
 }
 
-int ftrace_make_nop(struct module *mod,
-		    struct dyn_ftrace *rec, unsigned long addr)
+#ifdef CONFIG_PPC64
+static int
+__ftrace_make_nop(struct module *mod,
+		  struct dyn_ftrace *rec, unsigned long addr)
 {
 	unsigned char replaced[MCOUNT_INSN_SIZE * 2];
 	unsigned int *op = (unsigned *)&replaced;
 	unsigned char jmp[8];
 	unsigned long *ptr = (unsigned long *)&jmp;
-	unsigned char *old, *new;
 	unsigned long ip = rec->ip;
 	unsigned long tramp;
 	int offset;
-
-	/*
-	 * If the calling address is more that 24 bits away,
-	 * then we had to use a trampoline to make the call.
-	 * Otherwise just update the call site.
-	 */
-	if (test_24bit_addr(ip, addr)) {
-		/* within range */
-		old = ftrace_call_replace(ip, addr);
-		new = ftrace_nop_replace();
-		return ftrace_modify_code(ip, old, new);
-	}
-
-#ifndef CONFIG_PPC64
-	/* only supported for PPC64 for now */
-	return 0;
-#else
 
 	/*
 	 * Out of range jumps are called from modules.
@@ -258,16 +242,105 @@ int ftrace_make_nop(struct module *mod,
 		return -EPERM;
 
 	return 0;
-#endif /* CONFIG_PPC64 */
 }
 
-int ftrace_make_call(struct dyn_ftrace *rec, unsigned long addr)
+#else /* !PPC64 */
+static int
+__ftrace_make_nop(struct module *mod,
+		  struct dyn_ftrace *rec, unsigned long addr)
 {
-	unsigned char replaced[MCOUNT_INSN_SIZE * 2];
+	unsigned char replaced[MCOUNT_INSN_SIZE];
 	unsigned int *op = (unsigned *)&replaced;
+	unsigned char jmp[8];
+	unsigned int *ptr = (unsigned int *)&jmp;
+	unsigned long ip = rec->ip;
+	unsigned long tramp;
+	int offset;
+
+	/*
+	 * Out of range jumps are called from modules.
+	 * We should either already have a pointer to the module
+	 * or it has been passed in.
+	 */
+	if (!rec->arch.mod) {
+		if (!mod) {
+			printk(KERN_ERR "No module loaded addr=%lx\n",
+			       addr);
+			return -EFAULT;
+		}
+		rec->arch.mod = mod;
+	} else if (mod) {
+		printk(KERN_ERR
+		       "Record mod %p not equal to passed in mod %p\n",
+		       rec->arch.mod, mod);
+		return -EINVAL;
+	} else
+		mod = rec->arch.mod;
+
+	/* read where this goes */
+	if (probe_kernel_read(replaced, (void *)ip, MCOUNT_INSN_SIZE))
+		return -EFAULT;
+
+	/* Make sure that that this is still a 24bit jump */
+	if ((*op & 0xff000000) != 0x48000000) {
+		printk(KERN_ERR "Not expected bl: opcode is %x\n", *op);
+		return -EINVAL;
+	}
+
+	/* lets find where the pointer goes */
+	offset = (*op & 0x03fffffc);
+	/* make it signed */
+	if (offset & 0x02000000)
+		offset |= 0xfe000000;
+
+	tramp = ip + (long)offset;
+
+	/*
+	 * On PPC32 the trampoline looks like:
+	 * lis r11,sym@ha
+	 * addi r11,r11,sym@l
+	 * mtctr r11
+	 * bctr
+	 */
+
+	DEBUGP("ip:%lx jumps to %lx", ip, tramp);
+
+	/* Find where the trampoline jumps to */
+	if (probe_kernel_read(jmp, (void *)tramp, 8)) {
+		printk(KERN_ERR "Failed to read %lx\n", tramp);
+		return -EFAULT;
+	}
+
+	DEBUGP(" %08x %08x ", ptr[0], ptr[1]);
+
+	tramp = (ptr[1] & 0xffff) |
+		((ptr[0] & 0xffff) << 16);
+	if (tramp & 0x8000)
+		tramp -= 0x10000;
+
+	DEBUGP(" %x ", tramp);
+
+	if (tramp != addr) {
+		printk(KERN_ERR
+		       "Trampoline location %08lx does not match addr\n",
+		       tramp);
+		return -EINVAL;
+	}
+
+	op[0] = PPC_NOP_INSTR;
+
+	if (probe_kernel_write((void *)ip, replaced, MCOUNT_INSN_SIZE))
+		return -EPERM;
+
+	return 0;
+}
+#endif /* PPC64 */
+
+int ftrace_make_nop(struct module *mod,
+		    struct dyn_ftrace *rec, unsigned long addr)
+{
 	unsigned char *old, *new;
 	unsigned long ip = rec->ip;
-	unsigned long offset;
 
 	/*
 	 * If the calling address is more that 24 bits away,
@@ -276,15 +349,23 @@ int ftrace_make_call(struct dyn_ftrace *rec, unsigned long addr)
 	 */
 	if (test_24bit_addr(ip, addr)) {
 		/* within range */
-		old = ftrace_nop_replace();
-		new = ftrace_call_replace(ip, addr);
+		old = ftrace_call_replace(ip, addr);
+		new = ftrace_nop_replace();
 		return ftrace_modify_code(ip, old, new);
 	}
 
-#ifndef CONFIG_PPC64
-	/* only supported for PPC64 for now */
-	return 0;
-#else
+	return __ftrace_make_nop(mod, rec, addr);
+
+}
+
+#ifdef CONFIG_PPC64
+static int
+__ftrace_make_call(struct dyn_ftrace *rec, unsigned long addr)
+{
+	unsigned char replaced[MCOUNT_INSN_SIZE * 2];
+	unsigned int *op = (unsigned *)&replaced;
+	unsigned long ip = rec->ip;
+	unsigned long offset;
 
 	/*
 	 * Out of range jumps are called from modules.
@@ -334,7 +415,83 @@ int ftrace_make_call(struct dyn_ftrace *rec, unsigned long addr)
 		return -EPERM;
 
 	return 0;
-#endif /* CONFIG_PPC64 */
+}
+#else
+static int
+__ftrace_make_call(struct dyn_ftrace *rec, unsigned long addr)
+{
+	unsigned char replaced[MCOUNT_INSN_SIZE];
+	unsigned int *op = (unsigned *)&replaced;
+	unsigned long ip = rec->ip;
+	unsigned long offset;
+
+	/*
+	 * Out of range jumps are called from modules.
+	 * Being that we are converting from nop, it had better
+	 * already have a module defined.
+	 */
+	if (!rec->arch.mod) {
+		printk(KERN_ERR "No module loaded\n");
+		return -EINVAL;
+	}
+
+	/* read where this goes */
+	if (probe_kernel_read(replaced, (void *)ip, MCOUNT_INSN_SIZE))
+		return -EFAULT;
+
+	/* It should be pointing to a nop */
+	if (op[0] != PPC_NOP_INSTR) {
+		printk(KERN_ERR "Expected NOP but have %x\n", op[0]);
+		return -EINVAL;
+	}
+
+	/* If we never set up a trampoline to ftrace_caller, then bail */
+	if (!rec->arch.mod->arch.tramp) {
+		printk(KERN_ERR "No ftrace trampoline\n");
+		return -EINVAL;
+	}
+
+	/* now calculate a jump to the ftrace caller trampoline */
+	offset = rec->arch.mod->arch.tramp - ip;
+
+	if (offset + 0x2000000 > 0x3ffffff || (offset & 3) != 0) {
+		printk(KERN_ERR "REL24 %li out of range!\n",
+		       (long int)offset);
+		return -EINVAL;
+	}
+
+
+	/* Set to "bl addr" */
+	op[0] = 0x48000001 | (offset & 0x03fffffc);
+
+	DEBUGP("write to %lx\n", rec->ip);
+
+	if (probe_kernel_write((void *)ip, replaced, MCOUNT_INSN_SIZE))
+		return -EPERM;
+
+	return 0;
+}
+#endif
+
+int ftrace_make_call(struct dyn_ftrace *rec, unsigned long addr)
+{
+	unsigned char *old, *new;
+	unsigned long ip = rec->ip;
+
+	/*
+	 * If the calling address is more that 24 bits away,
+	 * then we had to use a trampoline to make the call.
+	 * Otherwise just update the call site.
+	 */
+	if (test_24bit_addr(ip, addr)) {
+		/* within range */
+		old = ftrace_nop_replace();
+		new = ftrace_call_replace(ip, addr);
+		return ftrace_modify_code(ip, old, new);
+	}
+
+	return __ftrace_make_call(rec, addr);
+
 }
 
 int ftrace_update_ftrace_func(ftrace_func_t func)
