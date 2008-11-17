@@ -131,7 +131,7 @@ static int test_24bit_addr(unsigned long ip, unsigned long addr)
 
 static int is_bl_op(unsigned int op)
 {
-	return (op & 0xff000000) == 0x48000000;
+	return (op & 0xfc000003) == 0x48000001;
 }
 
 static int test_offset(unsigned long offset)
