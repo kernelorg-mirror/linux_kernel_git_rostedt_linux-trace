@@ -354,10 +354,13 @@ int ftrace_make_nop(struct module *mod,
 		}
 		rec->arch.mod = mod;
 	} else if (mod) {
-		printk(KERN_ERR
-		       "Record mod %p not equal to passed in mod %p\n",
-		       rec->arch.mod, mod);
-		return -EINVAL;
+		if (mod != rec->arch.mod) {
+			printk(KERN_ERR
+			       "Record mod %p not equal to passed in mod %p\n",
+			       rec->arch.mod, mod);
+			return -EINVAL;
+		}
+		/* nothing to do if mod == rec->arch.mod */
 	} else
 		mod = rec->arch.mod;
 
