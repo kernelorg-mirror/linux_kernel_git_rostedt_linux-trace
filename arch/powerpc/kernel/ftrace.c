@@ -109,6 +109,9 @@ ftrace_modify_code(unsigned long ip, unsigned char *old_code,
 	return 0;
 }
 
+/*
+ * Helper functions that are the same for both PPC64 and PPC32.
+ */
 static int test_24bit_addr(unsigned long ip, unsigned long addr)
 {
 	unsigned long diff;
@@ -117,6 +120,34 @@ static int test_24bit_addr(unsigned long ip, unsigned long addr)
 	diff = ip > addr ? ip - addr : addr - ip;
 
 	return !(diff & ((unsigned long)-1 << 24));
+}
+
+static int is_bl_op(unsigned int op)
+{
+	return (op & 0xff000000) == 0x48000000;
+}
+
+static int test_offset(unsigned long offset)
+{
+	return (offset + 0x2000000 > 0x3ffffff) || ((offset & 3) != 0);
+}
+
+static unsigned long find_bl_target(unsigned long ip, unsigned int op)
+{
+	static int offset;
+
+	offset = (op & 0x03fffffc);
+	/* make it signed */
+	if (offset & 0x02000000)
+		offset |= 0xfe000000;
+
+	return ip + (long)offset;
+}
+
+static unsigned int branch_offset(unsigned long offset)
+{
+	/* return "bl ip+offset" */
+	return 0x48000001 | (offset & 0x03fffffc);
 }
 
 #ifdef CONFIG_PPC64
@@ -132,43 +163,18 @@ __ftrace_make_nop(struct module *mod,
 	unsigned long tramp;
 	int offset;
 
-	/*
-	 * Out of range jumps are called from modules.
-	 * We should either already have a pointer to the module
-	 * or it has been passed in.
-	 */
-	if (!rec->arch.mod) {
-		if (!mod) {
-			printk(KERN_ERR "No module loaded addr=%lx\n",
-			       addr);
-			return -EFAULT;
-		}
-		rec->arch.mod = mod;
-	} else if (mod) {
-		printk(KERN_ERR
-		       "Record mod %p not equal to passed in mod %p\n",
-		       rec->arch.mod, mod);
-		return -EINVAL;
-	} else
-		mod = rec->arch.mod;
-
 	/* read where this goes */
 	if (probe_kernel_read(replaced, (void *)ip, MCOUNT_INSN_SIZE))
 		return -EFAULT;
 
 	/* Make sure that that this is still a 24bit jump */
-	if ((*op & 0xff000000) != 0x48000000) {
+	if (!is_bl_op(*op)) {
 		printk(KERN_ERR "Not expected bl: opcode is %x\n", *op);
 		return -EINVAL;
 	}
 
 	/* lets find where the pointer goes */
-	offset = (*op & 0x03fffffc);
-	/* make it signed */
-	if (offset & 0x02000000)
-		offset |= 0xfe000000;
-
-	tramp = ip + (long)offset;
+	tramp = find_bl_target(ip, *op);
 
 	/*
 	 * On PPC64 the trampoline looks like:
@@ -257,43 +263,17 @@ __ftrace_make_nop(struct module *mod,
 	unsigned long tramp;
 	int offset;
 
-	/*
-	 * Out of range jumps are called from modules.
-	 * We should either already have a pointer to the module
-	 * or it has been passed in.
-	 */
-	if (!rec->arch.mod) {
-		if (!mod) {
-			printk(KERN_ERR "No module loaded addr=%lx\n",
-			       addr);
-			return -EFAULT;
-		}
-		rec->arch.mod = mod;
-	} else if (mod) {
-		printk(KERN_ERR
-		       "Record mod %p not equal to passed in mod %p\n",
-		       rec->arch.mod, mod);
-		return -EINVAL;
-	} else
-		mod = rec->arch.mod;
-
-	/* read where this goes */
 	if (probe_kernel_read(replaced, (void *)ip, MCOUNT_INSN_SIZE))
 		return -EFAULT;
 
 	/* Make sure that that this is still a 24bit jump */
-	if ((*op & 0xff000000) != 0x48000000) {
+	if (!is_bl_op(*op)) {
 		printk(KERN_ERR "Not expected bl: opcode is %x\n", *op);
 		return -EINVAL;
 	}
 
 	/* lets find where the pointer goes */
-	offset = (*op & 0x03fffffc);
-	/* make it signed */
-	if (offset & 0x02000000)
-		offset |= 0xfe000000;
-
-	tramp = ip + (long)offset;
+	tramp = find_bl_target(ip, *op);
 
 	/*
 	 * On PPC32 the trampoline looks like:
@@ -354,6 +334,26 @@ int ftrace_make_nop(struct module *mod,
 		return ftrace_modify_code(ip, old, new);
 	}
 
+	/*
+	 * Out of range jumps are called from modules.
+	 * We should either already have a pointer to the module
+	 * or it has been passed in.
+	 */
+	if (!rec->arch.mod) {
+		if (!mod) {
+			printk(KERN_ERR "No module loaded addr=%lx\n",
+			       addr);
+			return -EFAULT;
+		}
+		rec->arch.mod = mod;
+	} else if (mod) {
+		printk(KERN_ERR
+		       "Record mod %p not equal to passed in mod %p\n",
+		       rec->arch.mod, mod);
+		return -EINVAL;
+	} else
+		mod = rec->arch.mod;
+
 	return __ftrace_make_nop(mod, rec, addr);
 
 }
@@ -366,16 +366,6 @@ __ftrace_make_call(struct dyn_ftrace *rec, unsigned long addr)
 	unsigned int *op = (unsigned *)&replaced;
 	unsigned long ip = rec->ip;
 	unsigned long offset;
-
-	/*
-	 * Out of range jumps are called from modules.
-	 * Being that we are converting from nop, it had better
-	 * already have a module defined.
-	 */
-	if (!rec->arch.mod) {
-		printk(KERN_ERR "No module loaded\n");
-		return -EINVAL;
-	}
 
 	/* read where this goes */
 	if (probe_kernel_read(replaced, (void *)ip, MCOUNT_INSN_SIZE * 2))
@@ -397,15 +387,14 @@ __ftrace_make_call(struct dyn_ftrace *rec, unsigned long addr)
 	/* now calculate a jump to the ftrace caller trampoline */
 	offset = rec->arch.mod->arch.tramp - ip;
 
-	if (offset + 0x2000000 > 0x3ffffff || (offset & 3) != 0) {
+	if (test_offset(offset)) {
 		printk(KERN_ERR "REL24 %li out of range!\n",
 		       (long int)offset);
 		return -EINVAL;
 	}
 
-
 	/* Set to "bl addr" */
-	op[0] = 0x48000001 | (offset & 0x03fffffc);
+	op[0] = branch_offset(offset);
 	/* ld r2,40(r1) */
 	op[1] = 0xe8410028;
 
@@ -424,16 +413,6 @@ __ftrace_make_call(struct dyn_ftrace *rec, unsigned long addr)
 	unsigned int *op = (unsigned *)&replaced;
 	unsigned long ip = rec->ip;
 	unsigned long offset;
-
-	/*
-	 * Out of range jumps are called from modules.
-	 * Being that we are converting from nop, it had better
-	 * already have a module defined.
-	 */
-	if (!rec->arch.mod) {
-		printk(KERN_ERR "No module loaded\n");
-		return -EINVAL;
-	}
 
 	/* read where this goes */
 	if (probe_kernel_read(replaced, (void *)ip, MCOUNT_INSN_SIZE))
@@ -454,15 +433,14 @@ __ftrace_make_call(struct dyn_ftrace *rec, unsigned long addr)
 	/* now calculate a jump to the ftrace caller trampoline */
 	offset = rec->arch.mod->arch.tramp - ip;
 
-	if (offset + 0x2000000 > 0x3ffffff || (offset & 3) != 0) {
+	if (test_offset(offset)) {
 		printk(KERN_ERR "REL24 %li out of range!\n",
 		       (long int)offset);
 		return -EINVAL;
 	}
 
-
 	/* Set to "bl addr" */
-	op[0] = 0x48000001 | (offset & 0x03fffffc);
+	op[0] = branch_offset(offset);
 
 	DEBUGP("write to %lx\n", rec->ip);
 
@@ -488,6 +466,16 @@ int ftrace_make_call(struct dyn_ftrace *rec, unsigned long addr)
 		old = ftrace_nop_replace();
 		new = ftrace_call_replace(ip, addr);
 		return ftrace_modify_code(ip, old, new);
+	}
+
+	/*
+	 * Out of range jumps are called from modules.
+	 * Being that we are converting from nop, it had better
+	 * already have a module defined.
+	 */
+	if (!rec->arch.mod) {
+		printk(KERN_ERR "No module loaded\n");
+		return -EINVAL;
 	}
 
 	return __ftrace_make_call(rec, addr);
