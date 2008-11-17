@@ -114,12 +114,19 @@ ftrace_modify_code(unsigned long ip, unsigned char *old_code,
  */
 static int test_24bit_addr(unsigned long ip, unsigned long addr)
 {
-	unsigned long diff;
+	long diff;
 
-	/* can we get to addr from ip in 24 bits? */
-	diff = ip > addr ? ip - addr : addr - ip;
+	/*
+	 * Can we get to addr from ip in 24 bits?
+	 *  (26 really, since we mulitply by 4 for 4 byte alignment)
+	 */
+	diff = addr - ip;
 
-	return !(diff & ((unsigned long)-1 << 24));
+	/*
+	 * Return true if diff is less than 1 << 25
+	 *  and greater than -1 << 26.
+	 */
+	return (diff < (1 << 25)) && (diff > (-1 << 26));
 }
 
 static int is_bl_op(unsigned int op)
