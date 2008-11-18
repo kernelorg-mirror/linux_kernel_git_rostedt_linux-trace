@@ -158,6 +158,9 @@ static unsigned int branch_offset(unsigned long offset)
 }
 
 #ifdef CONFIG_PPC64
+/* static variable to not confuse recordmcount.pl script */
+static const unsigned long mcount_addr = MCOUNT_ADDR;
+
 static int
 __ftrace_make_nop(struct module *mod,
 		  struct dyn_ftrace *rec, unsigned long addr)
@@ -168,7 +171,7 @@ __ftrace_make_nop(struct module *mod,
 	unsigned long *ptr = (unsigned long *)&jmp;
 	unsigned long ip = rec->ip;
 	unsigned long tramp;
-	int offset;
+	int offset, size;
 
 	/* read where this goes */
 	if (probe_kernel_read(replaced, (void *)ip, MCOUNT_INSN_SIZE))
@@ -248,10 +251,34 @@ __ftrace_make_nop(struct module *mod,
 		return -EINVAL;
 	}
 
-	op[0] = PPC_NOP_INSTR;
-	op[1] = PPC_NOP_INSTR;
+	/*
+	 * Milton Miller pointed out that we can not blindly do nops.
+	 * If a task was preempted when calling a trace function,
+	 * the nops will remove the way to restore the TOC in r2
+	 * and the r2 TOC will get corrupted.
+	 *
+	 * But, we only need to do that on shutdown of the tracer,
+	 * if the pointer is still to mcount, then this is being called
+	 * from initialization code, and we do not need to worry about
+	 * races. NOPs are a tiny bit faster than a branch, so use that first.
+	 * Why punish those that never start a trace.
+	 */
+	if (addr == (unsigned long)mcount_addr) {
+		op[0] = PPC_NOP_INSTR;
+		op[1] = PPC_NOP_INSTR;
+		size = MCOUNT_INSN_SIZE * 2;
+	} else {
+		/*
+		 * Replace with:
+		 *   bl <tramp>  <<<<< replace by "b 1f"
+		 *   ld r2,40(r1)
+		 *  1:
+		 */
+		op[0] = 0x48000008;	/* b +8 */
+		size = MCOUNT_INSN_SIZE;
+	}
 
-	if (probe_kernel_write((void *)ip, replaced, MCOUNT_INSN_SIZE * 2))
+	if (probe_kernel_write((void *)ip, replaced, size))
 		return -EPERM;
 
 	return 0;
@@ -381,9 +408,12 @@ __ftrace_make_call(struct dyn_ftrace *rec, unsigned long addr)
 	if (probe_kernel_read(replaced, (void *)ip, MCOUNT_INSN_SIZE * 2))
 		return -EFAULT;
 
-	/* It should be pointing to two nops */
-	if ((op[0] != PPC_NOP_INSTR) ||
-	    (op[1] != PPC_NOP_INSTR)) {
+	/*
+	 * It should be pointing to two nops or
+	 *  b +8; ld r2,40(r1)
+	 */
+	if (((op[0] != 0x48000008) || (op[1] != 0xe8410028)) &&
+	    ((op[0] != PPC_NOP_INSTR) || (op[1] != PPC_NOP_INSTR))) {
 		printk(KERN_ERR "Expected NOPs but have %x %x\n", op[0], op[1]);
 		return -EINVAL;
 	}
