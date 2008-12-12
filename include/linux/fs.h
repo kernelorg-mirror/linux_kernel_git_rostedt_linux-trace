@@ -1055,13 +1055,25 @@ extern int lock_may_write(struct inode *, loff_t start, unsigned long count);
 #define posix_lock_file_wait(a, b) ({ -ENOLCK; })
 #define posix_unblock_lock(a, b) (-ENOENT)
 #define vfs_test_lock(a, b) ({ 0; })
-#define vfs_lock_file(a, b, c, d) (-ENOLCK)
+static inline int
+vfs_lock_file(struct file *filp, unsigned int cmd,
+	      struct file_lock *fl, struct file_lock *conf)
+{
+	return -ENOLCK;
+}
 #define vfs_cancel_lock(a, b) ({ 0; })
 #define flock_lock_file_wait(a, b) ({ -ENOLCK; })
 #define __break_lease(a, b) ({ 0; })
-#define lease_get_mtime(a, b) ({ })
+static inline void lease_get_mtime(struct inode *inode, struct timespec *time)
+{
+	*time = (struct timespec) { 0, };
+}
 #define generic_setlease(a, b, c) ({ -EINVAL; })
-#define vfs_setlease(a, b, c) ({ -EINVAL; })
+static inline int
+vfs_setlease(struct file *filp, long arg, struct file_lock **lease)
+{
+	return -EINVAL;
+}
 #define lease_modify(a, b) ({ -EINVAL; })
 #define lock_may_read(a, b, c) ({ 1; })
 #define lock_may_write(a, b, c) ({ 1; })
