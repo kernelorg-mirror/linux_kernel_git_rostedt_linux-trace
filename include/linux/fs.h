@@ -1582,9 +1582,9 @@ int __put_super_and_need_restart(struct super_block *sb);
 
 /* Alas, no aliases. Too much hassle with bringing module.h everywhere */
 #define fops_get(fops) \
-	(((fops) && try_module_get((fops)->owner) ? (fops) : NULL))
+	(((fops != NULL) && try_module_get((fops)->owner) ? (fops) : NULL))
 #define fops_put(fops) \
-	do { if (fops) module_put((fops)->owner); } while(0)
+	do { if (fops != NULL) module_put((fops)->owner); } while(0)
 
 extern int register_filesystem(struct file_system_type *);
 extern int unregister_filesystem(struct file_system_type *);
@@ -1660,7 +1660,7 @@ static inline int break_lease(struct inode *inode, unsigned int mode)
 #else /* !CONFIG_FILE_LOCKING */
 #define locks_mandatory_locked(a) ({ 0; })
 #define locks_mandatory_area(a, b, c, d, e) ({ 0; })
-#define __mandatory_lock(a) ({ 0; })
+static inline int __mandatory_lock(struct inode *ino) { return 0; }
 #define mandatory_lock(a) ({ 0; })
 #define locks_verify_locked(a) ({ 0; })
 #define locks_verify_truncate(a, b, c) ({ 0; })
