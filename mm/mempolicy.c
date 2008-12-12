@@ -1418,7 +1418,7 @@ unsigned slab_node(struct mempolicy *policy)
 	}
 
 	default:
-		BUG();
+		panic("slab_node: bad policy mode!");
 	}
 }
 
