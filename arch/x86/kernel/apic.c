@@ -31,6 +31,7 @@
 #include <linux/dmi.h>
 #include <linux/dmar.h>
 
+#include <asm/intel_arch_perfmon.h>
 #include <asm/atomic.h>
 #include <asm/smp.h>
 #include <asm/mtrr.h>
@@ -783,11 +784,7 @@ static void local_apic_timer_interrupt(void)
 	/*
 	 * the NMI deadlock-detector uses this.
 	 */
-#ifdef CONFIG_X86_64
-	add_pda(apic_timer_irqs, 1);
-#else
-	per_cpu(irq_stat, cpu).apic_timer_irqs++;
-#endif
+	inc_irq_stat(apic_timer_irqs);
 
 	evt->event_handler(evt);
 }
@@ -1147,6 +1144,7 @@ void __cpuinit setup_local_APIC(void)
 		apic_write(APIC_ESR, 0);
 	}
 #endif
+	perf_counters_lapic_init(0);
 
 	preempt_disable();
 
@@ -1695,14 +1693,11 @@ void smp_spurious_interrupt(struct pt_regs *regs)
 	if (v & (1 << (SPURIOUS_APIC_VECTOR & 0x1f)))
 		ack_APIC_irq();
 
-#ifdef CONFIG_X86_64
-	add_pda(irq_spurious_count, 1);
-#else
+	inc_irq_stat(irq_spurious_count);
+
 	/* see sw-dev-man vol 3, chapter 7.4.13.5 */
 	printk(KERN_INFO "spurious APIC interrupt on CPU#%d, "
 	       "should never happen.\n", smp_processor_id());
-	__get_cpu_var(irq_stat).irq_spurious_count++;
-#endif
 	irq_exit();
 }
 
