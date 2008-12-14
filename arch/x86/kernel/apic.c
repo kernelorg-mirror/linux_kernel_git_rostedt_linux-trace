@@ -32,6 +32,7 @@
 #include <linux/dmar.h>
 #include <linux/ftrace.h>
 
+#include <asm/intel_arch_perfmon.h>
 #include <asm/atomic.h>
 #include <asm/smp.h>
 #include <asm/mtrr.h>
@@ -1136,6 +1137,7 @@ void __cpuinit setup_local_APIC(void)
 		apic_write(APIC_ESR, 0);
 	}
 #endif
+	perf_counters_lapic_init(0);
 
 	preempt_disable();
 
