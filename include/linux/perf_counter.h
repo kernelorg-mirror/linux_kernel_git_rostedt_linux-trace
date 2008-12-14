@@ -42,6 +42,8 @@ enum hw_event_types {
 	PERF_COUNT_BRANCH_INSTRUCTIONS	=  4,
 	PERF_COUNT_BRANCH_MISSES	=  5,
 
+	PERF_HW_EVENTS_MAX		=  6,
+
 	/*
 	 * Special "software" counters provided by the kernel, even if
 	 * the hardware does not support performance counters. These
@@ -50,11 +52,11 @@ enum hw_event_types {
 	 */
 	PERF_COUNT_CPU_CLOCK		= -1,
 	PERF_COUNT_TASK_CLOCK		= -2,
-	/*
-	 * Future software events:
-	 */
-	/* PERF_COUNT_PAGE_FAULTS	= -3,
-	   PERF_COUNT_CONTEXT_SWITCHES	= -4, */
+	PERF_COUNT_PAGE_FAULTS		= -3,
+	PERF_COUNT_CONTEXT_SWITCHES	= -4,
+	PERF_COUNT_CPU_MIGRATIONS	= -5,
+
+	PERF_SW_EVENTS_MIN		= -6,
 };
 
 /*
@@ -75,10 +77,11 @@ struct perf_counter_hw_event {
 	u64			irq_period;
 	u32			record_type;
 
-	u32			disabled     :  1, /* off by default */
-				nmi	     :  1, /* NMI sampling   */
-				raw	     :  1, /* raw event type */
-				__reserved_1 : 29;
+	u32			disabled     :  1, /* off by default      */
+				nmi	     :  1, /* NMI sampling        */
+				raw	     :  1, /* raw event type      */
+				inherit	     :  1, /* children inherit it */
+				__reserved_1 : 28;
 
 	u64			__reserved_2;
 };
@@ -91,14 +94,16 @@ struct perf_counter_hw_event {
  * struct hw_perf_counter - performance counter hardware details:
  */
 struct hw_perf_counter {
+#ifdef CONFIG_PERF_COUNTERS
 	u64				config;
 	unsigned long			config_base;
 	unsigned long			counter_base;
 	int				nmi;
 	unsigned int			idx;
-	u64				prev_count;
+	atomic64_t			prev_count;
 	u64				irq_period;
-	s32				next_count;
+	atomic64_t			period_left;
+#endif
 };
 
 /*
@@ -136,27 +141,30 @@ enum perf_counter_active_state {
 	PERF_COUNTER_STATE_ACTIVE	=  1,
 };
 
+struct file;
+
 /**
  * struct perf_counter - performance counter kernel representation:
  */
 struct perf_counter {
+#ifdef CONFIG_PERF_COUNTERS
 	struct list_head		list_entry;
 	struct list_head		sibling_list;
 	struct perf_counter		*group_leader;
 	const struct hw_perf_counter_ops *hw_ops;
 
 	enum perf_counter_active_state	state;
-#if BITS_PER_LONG == 64
 	atomic64_t			count;
-#else
-	atomic_t			count32[2];
-#endif
+
 	struct perf_counter_hw_event	hw_event;
 	struct hw_perf_counter		hw;
 
 	struct perf_counter_context	*ctx;
 	struct task_struct		*task;
+	struct file			*filp;
 
+	unsigned int			nr_inherited;
+	struct perf_counter		*parent;
 	/*
 	 * Protect attach/detach:
 	 */
@@ -172,6 +180,7 @@ struct perf_counter {
 	struct perf_data		*irqdata;
 	struct perf_data		*usrdata;
 	struct perf_data		data[2];
+#endif
 };
 
 /**
@@ -209,30 +218,34 @@ struct perf_cpu_context {
 extern int perf_max_counters;
 
 #ifdef CONFIG_PERF_COUNTERS
+extern void
+perf_counter_show(struct perf_counter *counter, char *str, int trace);
 extern const struct hw_perf_counter_ops *
 hw_perf_counter_init(struct perf_counter *counter);
 
 extern void perf_counter_task_sched_in(struct task_struct *task, int cpu);
 extern void perf_counter_task_sched_out(struct task_struct *task, int cpu);
 extern void perf_counter_task_tick(struct task_struct *task, int cpu);
-extern void perf_counter_init_task(struct task_struct *task);
+extern void perf_counter_init_task(struct task_struct *child);
+extern void perf_counter_exit_task(struct task_struct *child);
 extern void perf_counter_notify(struct pt_regs *regs);
 extern void perf_counter_print_debug(void);
 extern u64 hw_perf_save_disable(void);
 extern void hw_perf_restore(u64 ctrl);
-extern void atomic64_counter_set(struct perf_counter *counter, u64 val64);
-extern u64 atomic64_counter_read(struct perf_counter *counter);
 extern int perf_counter_task_disable(void);
 extern int perf_counter_task_enable(void);
 
 #else
+static inline void
+perf_counter_show(struct perf_counter *counter, char *str, int trace)   { }
 static inline void
 perf_counter_task_sched_in(struct task_struct *task, int cpu)		{ }
 static inline void
 perf_counter_task_sched_out(struct task_struct *task, int cpu)		{ }
 static inline void
 perf_counter_task_tick(struct task_struct *task, int cpu)		{ }
-static inline void perf_counter_init_task(struct task_struct *task)	{ }
+static inline void perf_counter_init_task(struct task_struct *child)	{ }
+static inline void perf_counter_exit_task(struct task_struct *child)	{ }
 static inline void perf_counter_notify(struct pt_regs *regs)		{ }
 static inline void perf_counter_print_debug(void)			{ }
 static inline void hw_perf_restore(u64 ctrl)			{ }
