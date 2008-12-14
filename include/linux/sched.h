@@ -259,8 +259,6 @@ static inline int select_nohz_load_balancer(int cpu)
 }
 #endif
 
-extern unsigned long rt_needs_cpu(int cpu);
-
 /*
  * Only dump TASK_* tasks. (0 for all tasks)
  */
@@ -2224,6 +2222,7 @@ extern void normalize_rt_tasks(void);
 extern struct task_group init_task_group;
 #ifdef CONFIG_USER_SCHED
 extern struct task_group root_task_group;
+extern void set_tg_uid(struct user_struct *user);
 #endif
 
 extern struct task_group *sched_create_group(struct task_group *parent);
