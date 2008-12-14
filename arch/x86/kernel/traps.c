@@ -47,6 +47,7 @@
 #endif
 
 #include <asm/stacktrace.h>
+#include <asm/kmemcheck.h>
 #include <asm/processor.h>
 #include <asm/debugreg.h>
 #include <asm/atomic.h>
@@ -481,11 +482,7 @@ do_nmi(struct pt_regs *regs, long error_code)
 {
 	nmi_enter();
 
-#ifdef CONFIG_X86_32
-	{ int cpu; cpu = smp_processor_id(); ++nmi_count(cpu); }
-#else
-	add_pda(__nmi_count, 1);
-#endif
+	inc_irq_stat(__nmi_count);
 
 	if (!ignore_nmis)
 		default_do_nmi(regs);
@@ -577,6 +574,10 @@ dotraplinkage void __kprobes do_debug(struct pt_regs *regs, long error_code)
 	int si_code;
 
 	get_debugreg(condition, 6);
+
+	/* Catch kmemcheck conditions first of all! */
+	if (condition & DR_STEP && kmemcheck_trap(regs))
+		return;
 
 	/*
 	 * The processor cleared BTF, so don't mark that we need it set.

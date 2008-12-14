@@ -102,6 +102,8 @@ static pmd_t * __init one_md_table_init(pgd_t *pgd)
 		set_pgd(pgd, __pgd(__pa(pmd_table) | _PAGE_PRESENT));
 		pud = pud_offset(pgd, 0);
 		BUG_ON(pmd_table != pmd_offset(pud, 0));
+
+		return pmd_table;
 	}
 #endif
 	pud = pud_offset(pgd, 0);
@@ -120,7 +122,7 @@ static pte_t * __init one_page_table_init(pmd_t *pmd)
 		pte_t *page_table = NULL;
 
 		if (after_init_bootmem) {
-#ifdef CONFIG_DEBUG_PAGEALLOC
+#if defined(CONFIG_DEBUG_PAGEALLOC) || defined(CONFIG_KMEMCHECK)
 			page_table = (pte_t *) alloc_bootmem_pages(PAGE_SIZE);
 #endif
 			if (!page_table)
@@ -824,7 +826,7 @@ unsigned long __init_refok init_memory_mapping(unsigned long start,
 	pgd_t *pgd_base = swapper_pg_dir;
 	unsigned long start_pfn, end_pfn;
 	unsigned long big_page_start;
-#ifdef CONFIG_DEBUG_PAGEALLOC
+#if defined(CONFIG_DEBUG_PAGEALLOC) || defined(CONFIG_KMEMCHECK)
 	/*
 	 * For CONFIG_DEBUG_PAGEALLOC, identity mapping will use small pages.
 	 * This will simplify cpa(), which otherwise needs to support splitting
@@ -968,8 +970,6 @@ void __init mem_init(void)
 {
 	int codesize, reservedpages, datasize, initsize;
 	int tmp;
-
-	start_periodic_check_for_corruption();
 
 #ifdef CONFIG_FLATMEM
 	BUG_ON(!mem_map);

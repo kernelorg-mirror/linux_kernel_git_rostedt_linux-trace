@@ -9,6 +9,7 @@ typedef struct {
 	unsigned long idle_timestamp;
 	unsigned int __nmi_count;	/* arch dependent */
 	unsigned int apic_timer_irqs;	/* arch dependent */
+	unsigned int apic_perf_irqs;	/* arch dependent */
 	unsigned int irq0_irqs;
 	unsigned int irq_resched_count;
 	unsigned int irq_call_count;
@@ -21,6 +22,8 @@ DECLARE_PER_CPU(irq_cpustat_t, irq_stat);
 
 #define __ARCH_IRQ_STAT
 #define __IRQ_STAT(cpu, member) (per_cpu(irq_stat, cpu).member)
+
+#define inc_irq_stat(member)	(__get_cpu_var(irq_stat).member++)
 
 void ack_bad_irq(unsigned int irq);
 #include <linux/irq_cpustat.h>

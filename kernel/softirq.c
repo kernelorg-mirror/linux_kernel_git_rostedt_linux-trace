@@ -102,20 +102,6 @@ void local_bh_disable(void)
 
 EXPORT_SYMBOL(local_bh_disable);
 
-void __local_bh_enable(void)
-{
-	WARN_ON_ONCE(in_irq());
-
-	/*
-	 * softirqs should never be enabled by __local_bh_enable(),
-	 * it always nests inside local_bh_enable() sections:
-	 */
-	WARN_ON_ONCE(softirq_count() == SOFTIRQ_OFFSET);
-
-	sub_preempt_count(SOFTIRQ_OFFSET);
-}
-EXPORT_SYMBOL_GPL(__local_bh_enable);
-
 /*
  * Special-case - softirqs can safely be enabled in
  * cond_resched_softirq(), or by __do_softirq(),
@@ -373,6 +359,17 @@ void __tasklet_hi_schedule(struct tasklet_struct *t)
 }
 
 EXPORT_SYMBOL(__tasklet_hi_schedule);
+
+void __tasklet_hi_schedule_first(struct tasklet_struct *t)
+{
+	BUG_ON(!irqs_disabled());
+
+	t->next = __get_cpu_var(tasklet_hi_vec).head;
+	__get_cpu_var(tasklet_hi_vec).head = t;
+	__raise_softirq_irqoff(HI_SOFTIRQ);
+}
+
+EXPORT_SYMBOL(__tasklet_hi_schedule_first);
 
 static void tasklet_action(struct softirq_action *a)
 {

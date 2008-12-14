@@ -71,6 +71,7 @@ struct sched_param {
 #include <linux/fs_struct.h>
 #include <linux/compiler.h>
 #include <linux/completion.h>
+#include <linux/perf_counter.h>
 #include <linux/pid.h>
 #include <linux/percpu.h>
 #include <linux/topology.h>
@@ -96,6 +97,7 @@ struct exec_domain;
 struct futex_pi_state;
 struct robust_list_head;
 struct bio;
+struct bts_tracer;
 
 /*
  * List of flags we want to share for kernel threads,
@@ -249,7 +251,7 @@ extern void init_idle_bootup_task(struct task_struct *idle);
 extern int runqueue_is_locked(void);
 extern void task_rq_unlock_wait(struct task_struct *p);
 
-extern cpumask_t nohz_cpu_mask;
+extern cpumask_var_t nohz_cpu_mask;
 #if defined(CONFIG_SMP) && defined(CONFIG_NO_HZ)
 extern int select_nohz_load_balancer(int cpu);
 #else
@@ -258,8 +260,6 @@ static inline int select_nohz_load_balancer(int cpu)
 	return 0;
 }
 #endif
-
-extern unsigned long rt_needs_cpu(int cpu);
 
 /*
  * Only dump TASK_* tasks. (0 for all tasks)
@@ -777,7 +777,6 @@ enum cpu_idle_type {
 
 struct sched_group {
 	struct sched_group *next;	/* Must be a circular list */
-	cpumask_t cpumask;
 
 	/*
 	 * CPU power of this group, SCHED_LOAD_SCALE being max power for a
@@ -790,7 +789,14 @@ struct sched_group {
 	 * (see include/linux/reciprocal_div.h)
 	 */
 	u32 reciprocal_cpu_power;
+
+	unsigned long cpumask[];
 };
+
+static inline struct cpumask *sched_group_cpus(struct sched_group *sg)
+{
+	return to_cpumask(sg->cpumask);
+}
 
 enum sched_domain_level {
 	SD_LV_NONE = 0,
@@ -815,7 +821,6 @@ struct sched_domain {
 	struct sched_domain *parent;	/* top domain must be null terminated */
 	struct sched_domain *child;	/* bottom domain must be null terminated */
 	struct sched_group *groups;	/* the balancing groups of the domain */
-	cpumask_t span;			/* span of all CPUs in this domain */
 	unsigned long min_interval;	/* Minimum balance interval ms */
 	unsigned long max_interval;	/* Maximum balance interval ms */
 	unsigned int busy_factor;	/* less balancing by factor if busy */
@@ -870,9 +875,17 @@ struct sched_domain {
 #ifdef CONFIG_SCHED_DEBUG
 	char *name;
 #endif
+
+	/* span of all CPUs in this domain */
+	unsigned long span[];
 };
 
-extern void partition_sched_domains(int ndoms_new, cpumask_t *doms_new,
+static inline struct cpumask *sched_domain_span(struct sched_domain *sd)
+{
+	return to_cpumask(sd->span);
+}
+
+extern void partition_sched_domains(int ndoms_new, struct cpumask *doms_new,
 				    struct sched_domain_attr *dattr_new);
 extern int arch_reinit_sched_domains(void);
 
@@ -881,7 +894,7 @@ extern int arch_reinit_sched_domains(void);
 struct sched_domain_attr;
 
 static inline void
-partition_sched_domains(int ndoms_new, cpumask_t *doms_new,
+partition_sched_domains(int ndoms_new, struct cpumask *doms_new,
 			struct sched_domain_attr *dattr_new)
 {
 }
@@ -963,7 +976,7 @@ struct sched_class {
 	void (*task_wake_up) (struct rq *this_rq, struct task_struct *task);
 
 	void (*set_cpus_allowed)(struct task_struct *p,
-				 const cpumask_t *newmask);
+				 const struct cpumask *newmask);
 
 	void (*rq_online)(struct rq *rq);
 	void (*rq_offline)(struct rq *rq);
@@ -1139,10 +1152,9 @@ struct task_struct {
 	pid_t pid;
 	pid_t tgid;
 
-#ifdef CONFIG_CC_STACKPROTECTOR
 	/* Canary value for the -fstack-protector gcc feature */
 	unsigned long stack_canary;
-#endif
+
 	/* 
 	 * pointers to (original) parent process, youngest child, younger sibling,
 	 * older sibling, respectively.  (p->father can be replaced with 
@@ -1164,6 +1176,19 @@ struct task_struct {
 	 */
 	struct list_head ptraced;
 	struct list_head ptrace_entry;
+
+#ifdef CONFIG_X86_PTRACE_BTS
+	/*
+	 * This is the tracer handle for the ptrace BTS extension.
+	 * This field actually belongs to the ptracer task.
+	 */
+	struct bts_tracer *bts;
+	/*
+	 * The buffer to hold the BTS data.
+	 */
+	void *bts_buffer;
+	size_t bts_size;
+#endif /* CONFIG_X86_PTRACE_BTS */
 
 	/* PID/PID hash table linkage. */
 	struct pid_link pids[PIDTYPE_MAX];
@@ -1326,6 +1351,7 @@ struct task_struct {
 	struct list_head pi_state_list;
 	struct futex_pi_state *pi_state_cache;
 #endif
+	struct perf_counter_context perf_counter_ctx;
 #ifdef CONFIG_NUMA
 	struct mempolicy *mempolicy;
 	short il_next;
@@ -1356,6 +1382,23 @@ struct task_struct {
 	unsigned long default_timer_slack_ns;
 
 	struct list_head	*scm_work_list;
+#ifdef CONFIG_FUNCTION_GRAPH_TRACER
+	/* Index of current stored adress in ret_stack */
+	int curr_ret_stack;
+	/* Stack of return addresses for return function tracing */
+	struct ftrace_ret_stack	*ret_stack;
+	/*
+	 * Number of functions that haven't been traced
+	 * because of depth overrun.
+	 */
+	atomic_t trace_overrun;
+	/* Pause for the tracing */
+	atomic_t tracing_graph_pause;
+#endif
+#ifdef CONFIG_TRACING
+	/* state flags for use by tracers */
+	unsigned long trace;
+#endif
 };
 
 /*
@@ -1594,12 +1637,12 @@ extern cputime_t task_gtime(struct task_struct *p);
 
 #ifdef CONFIG_SMP
 extern int set_cpus_allowed_ptr(struct task_struct *p,
-				const cpumask_t *new_mask);
+				const struct cpumask *new_mask);
 #else
 static inline int set_cpus_allowed_ptr(struct task_struct *p,
-				       const cpumask_t *new_mask)
+				       const struct cpumask *new_mask)
 {
-	if (!cpu_isset(0, *new_mask))
+	if (!cpumask_test_cpu(0, new_mask))
 		return -EINVAL;
 	return 0;
 }
@@ -2028,6 +2071,19 @@ static inline int object_is_on_stack(void *obj)
 
 extern void thread_info_cache_init(void);
 
+#ifdef CONFIG_DEBUG_STACK_USAGE
+static inline unsigned long stack_not_used(struct task_struct *p)
+{
+	unsigned long *n = end_of_stack(p);
+
+	do { 	/* Skip over canary */
+		n++;
+	} while (!*n);
+
+	return (unsigned long)n - (unsigned long)end_of_stack(p);
+}
+#endif
+
 /* set thread flags in other task's structures
  * - see asm/thread_info.h for TIF_xxxx flags available
  */
@@ -2212,8 +2268,8 @@ __trace_special(void *__tr, void *__data,
 }
 #endif
 
-extern long sched_setaffinity(pid_t pid, const cpumask_t *new_mask);
-extern long sched_getaffinity(pid_t pid, cpumask_t *mask);
+extern long sched_setaffinity(pid_t pid, const struct cpumask *new_mask);
+extern long sched_getaffinity(pid_t pid, struct cpumask *mask);
 
 extern int sched_mc_power_savings, sched_smt_power_savings;
 
@@ -2224,6 +2280,7 @@ extern void normalize_rt_tasks(void);
 extern struct task_group init_task_group;
 #ifdef CONFIG_USER_SCHED
 extern struct task_group root_task_group;
+extern void set_tg_uid(struct user_struct *user);
 #endif
 
 extern struct task_group *sched_create_group(struct task_group *parent);
@@ -2284,6 +2341,13 @@ static inline void inc_syscw(struct task_struct *tsk)
 #ifndef TASK_SIZE_OF
 #define TASK_SIZE_OF(tsk)	TASK_SIZE
 #endif
+
+/*
+ * Call the function if the target task is executing on a CPU right now:
+ */
+extern void task_oncpu_function_call(struct task_struct *p,
+				     void (*func) (void *info), void *info);
+
 
 #ifdef CONFIG_MM_OWNER
 extern void mm_update_next_owner(struct mm_struct *mm);

@@ -16,6 +16,7 @@
 
 #include <stdarg.h>
 
+#include <linux/stackprotector.h>
 #include <linux/cpu.h>
 #include <linux/errno.h>
 #include <linux/sched.h>
@@ -39,6 +40,7 @@
 #include <linux/prctl.h>
 #include <linux/uaccess.h>
 #include <linux/io.h>
+#include <linux/ftrace.h>
 
 #include <asm/pgtable.h>
 #include <asm/system.h>
@@ -109,6 +111,17 @@ static inline void play_dead(void)
 void cpu_idle(void)
 {
 	current_thread_info()->status |= TS_POLLING;
+
+	/*
+	 * If we're the non-boot CPU, nothing set the PDA stack
+	 * canary up for us - and if we are the boot CPU we have
+	 * a 0 stack canary. This is a good place for updating
+	 * it, as we wont ever return from this function (so the
+	 * invalid canaries already on the stack wont ever
+	 * trigger):
+	 */
+	boot_init_stack_canary();
+
 	/* endless idle loop with no priority at all */
 	while (1) {
 		tick_nohz_stop_sched_tick(1);
@@ -236,11 +249,14 @@ void exit_thread(void)
 		put_cpu();
 	}
 #ifdef CONFIG_X86_DS
-	/* Free any DS contexts that have not been properly released. */
-	if (unlikely(t->ds_ctx)) {
-		/* we clear debugctl to make sure DS is not used. */
-		update_debugctlmsr(0);
-		ds_free(t->ds_ctx);
+	/* Free any BTS tracers that have not been properly released. */
+	if (unlikely(current->bts)) {
+		ds_release_bts(current->bts);
+		current->bts = NULL;
+
+		kfree(current->bts_buffer);
+		current->bts_buffer = NULL;
+		current->bts_size = 0;
 	}
 #endif /* CONFIG_X86_DS */
 }
@@ -470,35 +486,14 @@ static inline void __switch_to_xtra(struct task_struct *prev_p,
 				    struct tss_struct *tss)
 {
 	struct thread_struct *prev, *next;
-	unsigned long debugctl;
 
 	prev = &prev_p->thread,
 	next = &next_p->thread;
 
-	debugctl = prev->debugctlmsr;
-
-#ifdef CONFIG_X86_DS
-	{
-		unsigned long ds_prev = 0, ds_next = 0;
-
-		if (prev->ds_ctx)
-			ds_prev = (unsigned long)prev->ds_ctx->ds;
-		if (next->ds_ctx)
-			ds_next = (unsigned long)next->ds_ctx->ds;
-
-		if (ds_next != ds_prev) {
-			/*
-			 * We clear debugctl to make sure DS
-			 * is not in use when we change it:
-			 */
-			debugctl = 0;
-			update_debugctlmsr(0);
-			wrmsrl(MSR_IA32_DS_AREA, ds_next);
-		}
-	}
-#endif /* CONFIG_X86_DS */
-
-	if (next->debugctlmsr != debugctl)
+	if (test_tsk_thread_flag(next_p, TIF_DS_AREA_MSR) ||
+	    test_tsk_thread_flag(prev_p, TIF_DS_AREA_MSR))
+		ds_switch_to(prev_p, next_p);
+	else if (next->debugctlmsr != prev->debugctlmsr)
 		update_debugctlmsr(next->debugctlmsr);
 
 	if (test_tsk_thread_flag(next_p, TIF_DEBUG)) {
@@ -533,14 +528,6 @@ static inline void __switch_to_xtra(struct task_struct *prev_p,
 		 */
 		memset(tss->io_bitmap, 0xff, prev->io_bitmap_max);
 	}
-
-#ifdef CONFIG_X86_PTRACE_BTS
-	if (test_tsk_thread_flag(prev_p, TIF_BTS_TRACE_TS))
-		ptrace_bts_take_timestamp(prev_p, BTS_TASK_DEPARTS);
-
-	if (test_tsk_thread_flag(next_p, TIF_BTS_TRACE_TS))
-		ptrace_bts_take_timestamp(next_p, BTS_TASK_ARRIVES);
-#endif /* CONFIG_X86_PTRACE_BTS */
 }
 
 /*
@@ -551,8 +538,9 @@ static inline void __switch_to_xtra(struct task_struct *prev_p,
  * - could test fs/gs bitsliced
  *
  * Kprobes not supported here. Set the probe on schedule instead.
+ * Function graph tracer not supported too.
  */
-struct task_struct *
+__notrace_funcgraph struct task_struct *
 __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 {
 	struct thread_struct *prev = &prev_p->thread;
@@ -647,7 +635,6 @@ __switch_to(struct task_struct *prev_p, struct task_struct *next_p)
 		  (unsigned long)task_stack_page(next_p) +
 		  THREAD_SIZE - PDA_STACKOFFSET);
 #ifdef CONFIG_CC_STACKPROTECTOR
-	write_pda(stack_canary, next_p->stack_canary);
 	/*
 	 * Build time only check to make sure the stack_canary is at
 	 * offset 40 in the pda; this is a gcc ABI requirement

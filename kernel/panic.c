@@ -21,6 +21,7 @@
 #include <linux/debug_locks.h>
 #include <linux/random.h>
 #include <linux/kallsyms.h>
+#include <linux/dmi.h>
 
 int panic_on_oops;
 static unsigned long tainted_mask;
@@ -73,6 +74,9 @@ NORET_TYPE void panic(const char * fmt, ...)
 	vsnprintf(buf, sizeof(buf), fmt, args);
 	va_end(args);
 	printk(KERN_EMERG "Kernel panic - not syncing: %s\n",buf);
+#ifdef CONFIG_DEBUG_BUGVERBOSE
+	dump_stack();
+#endif
 	bust_spinlocks(0);
 
 	/*
@@ -321,36 +325,27 @@ void oops_exit(void)
 }
 
 #ifdef WANT_WARN_ON_SLOWPATH
-void warn_on_slowpath(const char *file, int line)
-{
-	char function[KSYM_SYMBOL_LEN];
-	unsigned long caller = (unsigned long) __builtin_return_address(0);
-	sprint_symbol(function, caller);
-
-	printk(KERN_WARNING "------------[ cut here ]------------\n");
-	printk(KERN_WARNING "WARNING: at %s:%d %s()\n", file,
-		line, function);
-	print_modules();
-	dump_stack();
-	print_oops_end_marker();
-	add_taint(TAINT_WARN);
-}
-EXPORT_SYMBOL(warn_on_slowpath);
-
-
 void warn_slowpath(const char *file, int line, const char *fmt, ...)
 {
 	va_list args;
 	char function[KSYM_SYMBOL_LEN];
 	unsigned long caller = (unsigned long)__builtin_return_address(0);
+	const char *board;
+
 	sprint_symbol(function, caller);
 
 	printk(KERN_WARNING "------------[ cut here ]------------\n");
 	printk(KERN_WARNING "WARNING: at %s:%d %s()\n", file,
 		line, function);
-	va_start(args, fmt);
-	vprintk(fmt, args);
-	va_end(args);
+	board = dmi_get_system_info(DMI_PRODUCT_NAME);
+	if (board)
+		printk(KERN_WARNING "Hardware name: %s\n", board);
+
+	if (fmt) {
+		va_start(args, fmt);
+		vprintk(fmt, args);
+		va_end(args);
+	}
 
 	print_modules();
 	dump_stack();
@@ -361,15 +356,22 @@ EXPORT_SYMBOL(warn_slowpath);
 #endif
 
 #ifdef CONFIG_CC_STACKPROTECTOR
+
+#ifndef GCC_HAS_SP
+#warning You have selected the CONFIG_CC_STACKPROTECTOR option, but the gcc used does not support this.
+#endif
+
 /*
  * Called when gcc's -fstack-protector feature is used, and
  * gcc detects corruption of the on-stack canary value
  */
 void __stack_chk_fail(void)
 {
-	panic("stack-protector: Kernel stack is corrupted");
+	panic("stack-protector: Kernel stack is corrupted in: %p\n",
+		__builtin_return_address(0));
 }
 EXPORT_SYMBOL(__stack_chk_fail);
+
 #endif
 
 core_param(panic, panic_timeout, int, 0644);

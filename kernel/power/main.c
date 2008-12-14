@@ -22,7 +22,6 @@
 #include <linux/freezer.h>
 #include <linux/vmstat.h>
 #include <linux/syscalls.h>
-#include <linux/ftrace.h>
 
 #include "power.h"
 
@@ -57,16 +56,6 @@ int pm_notifier_call_chain(unsigned long val)
 
 #ifdef CONFIG_PM_DEBUG
 int pm_test_level = TEST_NONE;
-
-static int suspend_test(int level)
-{
-	if (pm_test_level == level) {
-		printk(KERN_INFO "suspend debug: Waiting for 5 seconds.\n");
-		mdelay(5000);
-		return 1;
-	}
-	return 0;
-}
 
 static const char * const pm_tests[__TEST_AFTER_LAST] = {
 	[TEST_NONE] = "none",
@@ -126,15 +115,24 @@ static ssize_t pm_test_store(struct kobject *kobj, struct kobj_attribute *attr,
 }
 
 power_attr(pm_test);
-#else /* !CONFIG_PM_DEBUG */
-static inline int suspend_test(int level) { return 0; }
-#endif /* !CONFIG_PM_DEBUG */
+
+#endif /* CONFIG_PM_DEBUG */
 
 #endif /* CONFIG_PM_SLEEP */
 
 #ifdef CONFIG_SUSPEND
 
 #ifdef CONFIG_PM_TEST_SUSPEND
+
+static int suspend_test(int level)
+{
+	if (pm_test_level == level) {
+		printk(KERN_INFO "suspend debug: Waiting for 5 seconds.\n");
+		mdelay(5000);
+		return 1;
+	}
+	return 0;
+}
 
 /*
  * We test the system suspend code by setting an RTC wakealarm a short
@@ -185,6 +183,11 @@ static void suspend_test_start(void)
 
 static void suspend_test_finish(const char *label)
 {
+}
+
+static inline int suspend_test(int level)
+{
+	return 0;
 }
 
 #endif
@@ -317,7 +320,7 @@ static int suspend_enter(suspend_state_t state)
  */
 int suspend_devices_and_enter(suspend_state_t state)
 {
-	int error, ftrace_save;
+	int error;
 
 	if (!suspend_ops)
 		return -ENOSYS;
@@ -328,7 +331,6 @@ int suspend_devices_and_enter(suspend_state_t state)
 			goto Close;
 	}
 	suspend_console();
-	ftrace_save = __ftrace_enabled_save();
 	suspend_test_start();
 	error = device_suspend(PMSG_SUSPEND);
 	if (error) {
@@ -360,7 +362,6 @@ int suspend_devices_and_enter(suspend_state_t state)
 	suspend_test_start();
 	device_resume(PMSG_RESUME);
 	suspend_test_finish("resume devices");
-	__ftrace_enabled_restore(ftrace_save);
 	resume_console();
  Close:
 	if (suspend_ops->end)

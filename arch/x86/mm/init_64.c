@@ -689,7 +689,7 @@ unsigned long __init_refok init_memory_mapping(unsigned long start,
 	if (!after_bootmem)
 		init_gbpages();
 
-#ifdef CONFIG_DEBUG_PAGEALLOC
+#if defined(CONFIG_DEBUG_PAGEALLOC) || defined(CONFIG_KMEMCHECK)
 	/*
 	 * For CONFIG_DEBUG_PAGEALLOC, identity mapping will use small pages.
 	 * This will simplify cpa(), which otherwise needs to support splitting
@@ -901,8 +901,6 @@ void __init mem_init(void)
 {
 	long codesize, reservedpages, datasize, initsize;
 	unsigned long absent_pages;
-
-	start_periodic_check_for_corruption();
 
 	pci_iommu_alloc();
 

@@ -25,6 +25,7 @@
 #include <linux/kbd_kern.h>
 #include <linux/proc_fs.h>
 #include <linux/quotaops.h>
+#include <linux/perf_counter.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/suspend.h>
@@ -244,6 +245,7 @@ static void sysrq_handle_showregs(int key, struct tty_struct *tty)
 	struct pt_regs *regs = get_irq_regs();
 	if (regs)
 		show_regs(regs);
+	perf_counter_print_debug();
 }
 static struct sysrq_key_op sysrq_showregs_op = {
 	.handler	= sysrq_handle_showregs,
@@ -274,6 +276,22 @@ static struct sysrq_key_op sysrq_showstate_blocked_op = {
 	.enable_mask	= SYSRQ_ENABLE_DUMP,
 };
 
+#ifdef CONFIG_TRACING
+#include <linux/ftrace.h>
+
+static void sysrq_ftrace_dump(int key, struct tty_struct *tty)
+{
+	ftrace_dump();
+}
+static struct sysrq_key_op sysrq_ftrace_dump_op = {
+	.handler	= sysrq_ftrace_dump,
+	.help_msg	= "dumpZ-ftrace-buffer",
+	.action_msg	= "Dump ftrace buffer",
+	.enable_mask	= SYSRQ_ENABLE_DUMP,
+};
+#else
+#define sysrq_ftrace_dump_op (*(struct sysrq_key_op *)0)
+#endif
 
 static void sysrq_handle_showmem(int key, struct tty_struct *tty)
 {
@@ -406,7 +424,7 @@ static struct sysrq_key_op *sysrq_key_table[36] = {
 	NULL,				/* x */
 	/* y: May be registered on sparc64 for global register dump */
 	NULL,				/* y */
-	NULL				/* z */
+	&sysrq_ftrace_dump_op,		/* z */
 };
 
 /* key2index calculation, -1 on invalid index */

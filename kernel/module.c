@@ -47,6 +47,7 @@
 #include <linux/rculist.h>
 #include <asm/uaccess.h>
 #include <asm/cacheflush.h>
+#include <asm/sections.h>
 #include <linux/license.h>
 #include <asm/sections.h>
 #include <linux/tracepoint.h>
@@ -416,7 +417,7 @@ static void *percpu_modalloc(unsigned long size, unsigned long align,
 		align = PAGE_SIZE;
 	}
 
-	ptr = __per_cpu_start;
+	ptr = __per_cpu_load;
 	for (i = 0; i < pcpu_num_used; ptr += block_size(pcpu_size[i]), i++) {
 		/* Extra for alignment requirement. */
 		extra = ALIGN((unsigned long)ptr, align) - (unsigned long)ptr;
@@ -451,7 +452,7 @@ static void *percpu_modalloc(unsigned long size, unsigned long align,
 static void percpu_modfree(void *freeme)
 {
 	unsigned int i;
-	void *ptr = __per_cpu_start + block_size(pcpu_size[0]);
+	void *ptr = __per_cpu_load + block_size(pcpu_size[0]);
 
 	/* First entry is core kernel percpu data. */
 	for (i = 1; i < pcpu_num_used; ptr += block_size(pcpu_size[i]), i++) {
@@ -502,7 +503,7 @@ static int percpu_modinit(void)
 	pcpu_size = kmalloc(sizeof(pcpu_size[0]) * pcpu_num_allocated,
 			    GFP_KERNEL);
 	/* Static in-kernel percpu data (used). */
-	pcpu_size[0] = -(__per_cpu_end-__per_cpu_start);
+	pcpu_size[0] = -__per_cpu_size;
 	/* Free room. */
 	pcpu_size[1] = PERCPU_ENOUGH_ROOM + pcpu_size[0];
 	if (pcpu_size[1] < 0) {
@@ -2184,24 +2185,15 @@ static noinline struct module *load_module(void __user *umod,
 		struct mod_debug *debug;
 		unsigned int num_debug;
 
-#ifdef CONFIG_MARKERS
-		marker_update_probe_range(mod->markers,
-			mod->markers + mod->num_markers);
-#endif
 		debug = section_objs(hdr, sechdrs, secstrings, "__verbose",
 				     sizeof(*debug), &num_debug);
 		dynamic_printk_setup(debug, num_debug);
-
-#ifdef CONFIG_TRACEPOINTS
-		tracepoint_update_probe_range(mod->tracepoints,
-			mod->tracepoints + mod->num_tracepoints);
-#endif
 	}
 
 	/* sechdrs[0].sh_size is always zero */
 	mseg = section_objs(hdr, sechdrs, secstrings, "__mcount_loc",
 			    sizeof(*mseg), &num_mcount);
-	ftrace_init_module(mseg, mseg + num_mcount);
+	ftrace_init_module(mod, mseg, mseg + num_mcount);
 
 	err = module_finalize(hdr, sechdrs, mod);
 	if (err < 0)
@@ -2713,7 +2705,7 @@ int is_module_address(unsigned long addr)
 
 
 /* Is this a valid kernel address? */
-struct module *__module_text_address(unsigned long addr)
+__notrace_funcgraph struct module *__module_text_address(unsigned long addr)
 {
 	struct module *mod;
 

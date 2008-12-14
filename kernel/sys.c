@@ -14,6 +14,7 @@
 #include <linux/prctl.h>
 #include <linux/highuid.h>
 #include <linux/fs.h>
+#include <linux/perf_counter.h>
 #include <linux/resource.h>
 #include <linux/kernel.h>
 #include <linux/kexec.h>
@@ -858,8 +859,8 @@ void do_sys_times(struct tms *tms)
 	struct task_cputime cputime;
 	cputime_t cutime, cstime;
 
-	spin_lock_irq(&current->sighand->siglock);
 	thread_group_cputime(current, &cputime);
+	spin_lock_irq(&current->sighand->siglock);
 	cutime = current->signal->cutime;
 	cstime = current->signal->cstime;
 	spin_unlock_irq(&current->sighand->siglock);
@@ -1715,6 +1716,12 @@ asmlinkage long sys_prctl(int option, unsigned long arg2, unsigned long arg3,
 			break;
 		case PR_SET_TSC:
 			error = SET_TSC_CTL(arg2);
+			break;
+		case PR_TASK_PERF_COUNTERS_DISABLE:
+			error = perf_counter_task_disable();
+			break;
+		case PR_TASK_PERF_COUNTERS_ENABLE:
+			error = perf_counter_task_enable();
 			break;
 		case PR_GET_TIMERSLACK:
 			error = current->timer_slack_ns;

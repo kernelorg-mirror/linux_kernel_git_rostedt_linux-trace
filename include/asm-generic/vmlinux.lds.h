@@ -45,6 +45,22 @@
 #define MCOUNT_REC()
 #endif
 
+#ifdef CONFIG_TRACE_BRANCH_PROFILING
+#define LIKELY_PROFILE()	VMLINUX_SYMBOL(__start_annotated_branch_profile) = .; \
+				*(_ftrace_annotated_branch)			      \
+				VMLINUX_SYMBOL(__stop_annotated_branch_profile) = .;
+#else
+#define LIKELY_PROFILE()
+#endif
+
+#ifdef CONFIG_PROFILE_ALL_BRANCHES
+#define BRANCH_PROFILE()	VMLINUX_SYMBOL(__start_branch_profile) = .;   \
+				*(_ftrace_branch)			      \
+				VMLINUX_SYMBOL(__stop_branch_profile) = .;
+#else
+#define BRANCH_PROFILE()
+#endif
+
 /* .data section */
 #define DATA_DATA							\
 	*(.data)							\
@@ -60,9 +76,12 @@
 	VMLINUX_SYMBOL(__start___markers) = .;				\
 	*(__markers)							\
 	VMLINUX_SYMBOL(__stop___markers) = .;				\
+	. = ALIGN(32);							\
 	VMLINUX_SYMBOL(__start___tracepoints) = .;			\
 	*(__tracepoints)						\
-	VMLINUX_SYMBOL(__stop___tracepoints) = .;
+	VMLINUX_SYMBOL(__stop___tracepoints) = .;			\
+	LIKELY_PROFILE()		       				\
+	BRANCH_PROFILE()
 
 #define RO_DATA(align)							\
 	. = ALIGN((align));						\
@@ -269,6 +288,16 @@
 		*(.kprobes.text)					\
 		VMLINUX_SYMBOL(__kprobes_text_end) = .;
 
+#ifdef CONFIG_FUNCTION_GRAPH_TRACER
+#define IRQENTRY_TEXT							\
+		ALIGN_FUNCTION();					\
+		VMLINUX_SYMBOL(__irqentry_text_start) = .;		\
+		*(.irqentry.text)					\
+		VMLINUX_SYMBOL(__irqentry_text_end) = .;
+#else
+#define IRQENTRY_TEXT
+#endif
+
 /* Section used for early init (in .S files) */
 #define HEAD_TEXT  *(.head.text)
 
@@ -401,6 +430,21 @@
   	*(.initcall7.init)						\
   	*(.initcall7s.init)
 
+#ifdef CONFIG_HAVE_ZERO_BASED_PER_CPU
+#define PERCPU(align)							\
+	. = ALIGN(align);						\
+	percpu : { } :percpu						\
+	__per_cpu_load = .;						\
+	.data.percpu 0 : AT(__per_cpu_load - LOAD_OFFSET) {		\
+		*(.data.percpu.first)					\
+		*(.data.percpu.shared_aligned)				\
+		*(.data.percpu)						\
+		*(.data.percpu.page_aligned)				\
+		____per_cpu_size = .;					\
+	}								\
+	. = __per_cpu_load + ____per_cpu_size;				\
+	data : { } :data
+#else
 #define PERCPU(align)							\
 	. = ALIGN(align);						\
 	VMLINUX_SYMBOL(__per_cpu_start) = .;				\
@@ -410,3 +454,4 @@
 		*(.data.percpu.shared_aligned)				\
 	}								\
 	VMLINUX_SYMBOL(__per_cpu_end) = .;
+#endif

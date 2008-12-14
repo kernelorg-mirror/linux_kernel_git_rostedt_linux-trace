@@ -17,6 +17,7 @@
 #include <asm/io_apic.h>
 #include <asm/apic.h>
 #include <asm/iommu.h>
+#include <asm/gart.h>
 
 static void __init fix_hypertransport_config(int num, int slot, int func)
 {
@@ -96,6 +97,7 @@ static void __init nvidia_bugs(int num, int slot, int func)
 }
 
 #if defined(CONFIG_ACPI) && defined(CONFIG_X86_IO_APIC)
+#if defined(CONFIG_ACPI) && defined(CONFIG_X86_IO_APIC)
 static u32 __init ati_ixp4x0_rev(int num, int slot, int func)
 {
 	u32 d;
@@ -113,6 +115,7 @@ static u32 __init ati_ixp4x0_rev(int num, int slot, int func)
 	d &= 0xff;
 	return d;
 }
+#endif
 
 static void __init ati_bugs(int num, int slot, int func)
 {

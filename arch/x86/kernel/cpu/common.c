@@ -17,6 +17,7 @@
 #include <asm/mmu_context.h>
 #include <asm/mtrr.h>
 #include <asm/mce.h>
+#include <asm/intel_arch_perfmon.h>
 #include <asm/pat.h>
 #include <asm/asm.h>
 #include <asm/numa.h>
@@ -36,6 +37,7 @@
 #include <asm/proto.h>
 #include <asm/sections.h>
 #include <asm/setup.h>
+#include <asm/hypervisor.h>
 
 #include "cpu.h"
 
@@ -703,6 +705,7 @@ static void __cpuinit identify_cpu(struct cpuinfo_x86 *c)
 	detect_ht(c);
 #endif
 
+	init_hypervisor(c);
 	/*
 	 * On SMP, boot_cpu_data holds the common feature set between
 	 * all CPUs; so make sure that we indicate which features are
@@ -750,6 +753,7 @@ void __init identify_boot_cpu(void)
 #else
 	vgetcpu_set_mode();
 #endif
+	init_hw_perf_counters();
 }
 
 void __cpuinit identify_secondary_cpu(struct cpuinfo_x86 *c)

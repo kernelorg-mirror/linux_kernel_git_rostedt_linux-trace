@@ -6,6 +6,7 @@
  * documentation.
  */
 
+#include <linux/kmemcheck.h>
 #include <linux/scatterlist.h>
 #include <asm/io.h>
 #include <asm/swiotlb.h>
@@ -71,12 +72,10 @@ static inline struct dma_mapping_ops *get_dma_ops(struct device *dev)
 /* Make sure we keep the same behaviour */
 static inline int dma_mapping_error(struct device *dev, dma_addr_t dma_addr)
 {
-#ifdef CONFIG_X86_64
 	struct dma_mapping_ops *ops = get_dma_ops(dev);
 	if (ops->mapping_error)
 		return ops->mapping_error(dev, dma_addr);
 
-#endif
 	return (dma_addr == bad_dma_address);
 }
 
@@ -97,6 +96,7 @@ dma_map_single(struct device *hwdev, void *ptr, size_t size,
 	struct dma_mapping_ops *ops = get_dma_ops(hwdev);
 
 	BUG_ON(!valid_dma_direction(direction));
+	kmemcheck_mark_initialized(ptr, size);
 	return ops->map_single(hwdev, virt_to_phys(ptr), size, direction);
 }
 
