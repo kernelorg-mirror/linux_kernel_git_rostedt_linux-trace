@@ -118,6 +118,12 @@
  */
 #define RUNTIME_INF	((u64)~0ULL)
 
+DEFINE_TRACE(sched_wait_task);
+DEFINE_TRACE(sched_wakeup);
+DEFINE_TRACE(sched_wakeup_new);
+DEFINE_TRACE(sched_switch);
+DEFINE_TRACE(sched_migrate_task);
+
 #ifdef CONFIG_SMP
 /*
  * Divide a load by a sched group cpu_power : (load / sg->__cpu_power)
@@ -1857,6 +1863,8 @@ void set_task_cpu(struct task_struct *p, unsigned int new_cpu)
 
 	clock_offset = old_rq->clock - new_rq->clock;
 
+	trace_sched_migrate_task(p, task_cpu(p), new_cpu);
+
 #ifdef CONFIG_SCHEDSTATS
 	if (p->se.wait_start)
 		p->se.wait_start -= clock_offset;
@@ -2840,7 +2848,6 @@ static void sched_migrate_task(struct task_struct *p, int dest_cpu)
 	    || unlikely(!cpu_active(dest_cpu)))
 		goto out;
 
-	trace_sched_migrate_task(rq, p, dest_cpu);
 	/* force the process onto the specified CPU */
 	if (migrate_task(p, dest_cpu, &req)) {
 		/* Need to wait for migration thread (might exit: take ref). */
@@ -5874,6 +5881,7 @@ void __cpuinit init_idle(struct task_struct *idle, int cpu)
 	 * The idle tasks have their own, simple scheduling class:
 	 */
 	idle->sched_class = &idle_sched_class;
+	ftrace_graph_init_task(idle);
 }
 
 /*
