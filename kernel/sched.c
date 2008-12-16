@@ -2292,6 +2292,7 @@ static int try_to_wake_up(struct task_struct *p, unsigned int state, int sync)
 
 	smp_wmb();
 	rq = task_rq_lock(p, &flags);
+	update_rq_clock(rq);
 	old_state = p->state;
 	if (!(old_state & state))
 		goto out;
@@ -2349,7 +2350,6 @@ out_activate:
 		schedstat_inc(p, se.nr_wakeups_local);
 	else
 		schedstat_inc(p, se.nr_wakeups_remote);
-	update_rq_clock(rq);
 	activate_task(rq, p, 1);
 	success = 1;
 
