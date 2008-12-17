@@ -108,6 +108,8 @@ microcode-$(CONFIG_MICROCODE_INTEL)	+= microcode_intel.o
 microcode-$(CONFIG_MICROCODE_AMD)	+= microcode_amd.o
 obj-$(CONFIG_MICROCODE)			+= microcode.o
 
+obj-$(CONFIG_SWIOTLB)			+= pci-swiotlb_64.o # NB rename without _64
+
 obj-$(CONFIG_X86_CHECK_BIOS_CORRUPTION) += check.o
 
 ###
@@ -123,7 +125,6 @@ ifeq ($(CONFIG_X86_64),y)
         obj-$(CONFIG_GART_IOMMU)	+= pci-gart_64.o aperture_64.o
         obj-$(CONFIG_CALGARY_IOMMU)	+= pci-calgary_64.o tce_64.o
         obj-$(CONFIG_AMD_IOMMU)		+= amd_iommu_init.o amd_iommu.o
-        obj-$(CONFIG_SWIOTLB)		+= pci-swiotlb_64.o
 
         obj-$(CONFIG_PCI_MMCONFIG)	+= mmconf-fam10h_64.o
 endif
