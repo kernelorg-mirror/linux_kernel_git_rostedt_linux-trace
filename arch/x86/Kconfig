@@ -249,13 +249,22 @@ config X86_HAS_BOOT_CPU_ID
 
 config SPARSE_IRQ
 	bool "Support sparse irq numbering"
-	depends on (PCI_MSI || HT_IRQ) && SMP
+	depends on PCI_MSI || HT_IRQ
 	default y
 	help
 	  This enables support for sparse irq, esp for msi/msi-x. You may need
 	  if you have lots of cards supports msi-x installed.
 
 	  If you don't know what to do here, say Y.
+
+config NUMA_MIGRATE_IRQ_DESC
+	bool "Move irq desc when changing irq smp_affinity"
+	depends on SPARSE_IRQ && SMP
+	default n
+	help
+	  This enables moving irq_desc to cpu/node that irq will use handled.
+
+	  If you don't know what to do here, say N.
 
 config X86_FIND_SMP_CONFIG
 	def_bool y
@@ -589,19 +598,20 @@ config IOMMU_HELPER
 
 config MAXSMP
 	bool "Configure Maximum number of SMP Processors and NUMA Nodes"
-	depends on X86_64 && SMP && BROKEN
+	depends on X86_64 && SMP && DEBUG_KERNEL && EXPERIMENTAL
+	select CPUMASK_OFFSTACK
 	default n
 	help
 	  Configure maximum number of CPUS and NUMA Nodes for this architecture.
 	  If unsure, say N.
 
 config NR_CPUS
-	int "Maximum number of CPUs (2-512)" if !MAXSMP
-	range 2 512
-	depends on SMP
+	int "Maximum number of CPUs" if SMP && !MAXSMP
+	range 2 512 if SMP && !MAXSMP
+	default "1" if !SMP
 	default "4096" if MAXSMP
-	default "32" if X86_NUMAQ || X86_SUMMIT || X86_BIGSMP || X86_ES7000
-	default "8"
+	default "32" if SMP && (X86_NUMAQ || X86_SUMMIT || X86_BIGSMP || X86_ES7000)
+	default "8" if SMP
 	help
 	  This allows you to specify the maximum number of CPUs which this
 	  kernel will support.  The maximum supported value is 512 and the
