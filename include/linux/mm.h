@@ -145,6 +145,21 @@ extern pgprot_t protection_map[16];
 #define FAULT_FLAG_WRITE	0x01	/* Fault was a write access */
 #define FAULT_FLAG_NONLINEAR	0x02	/* Fault was via a nonlinear mapping */
 
+static inline int is_linear_pfn_mapping(struct vm_area_struct *vma)
+{
+	return ((vma->vm_flags & VM_PFNMAP) && vma->vm_pgoff);
+}
+
+static inline int is_pfn_mapping(struct vm_area_struct *vma)
+{
+	return (vma->vm_flags & VM_PFNMAP);
+}
+
+extern int track_pfn_vma_new(struct vm_area_struct *vma, pgprot_t prot,
+				unsigned long pfn, unsigned long size);
+extern int track_pfn_vma_copy(struct vm_area_struct *vma);
+extern void untrack_pfn_vma(struct vm_area_struct *vma, unsigned long pfn,
+				unsigned long size);
 
 /*
  * vm_fault is filled by the the pagefault handler and passed to the vma's
@@ -1213,6 +1228,9 @@ struct page *follow_page(struct vm_area_struct *, unsigned long address,
 #define FOLL_TOUCH	0x02	/* mark page accessed */
 #define FOLL_GET	0x04	/* do get_page on page */
 #define FOLL_ANON	0x08	/* give ZERO_PAGE if no pgtable */
+
+int follow_pfnmap_pte(struct vm_area_struct *vma,
+				unsigned long address, pte_t *ret_ptep);
 
 typedef int (*pte_fn_t)(pte_t *pte, pgtable_t token, unsigned long addr,
 			void *data);

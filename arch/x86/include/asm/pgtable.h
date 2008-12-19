@@ -160,7 +160,18 @@
 #define PGD_IDENT_ATTR	 0x001		/* PRESENT (no other attributes) */
 #endif
 
+/*
+ * Macro to mark a page protection value as UC-
+ */
+#define pgprot_noncached(prot)					\
+	((boot_cpu_data.x86 > 3)				\
+	 ? (__pgprot(pgprot_val(prot) | _PAGE_CACHE_UC_MINUS))	\
+	 : (prot))
+
 #ifndef __ASSEMBLY__
+
+#define pgprot_writecombine	pgprot_writecombine
+extern pgprot_t pgprot_writecombine(pgprot_t prot);
 
 /*
  * ZERO_PAGE is a global shared page that is always zero: used
@@ -219,6 +230,11 @@ static inline int pte_special(pte_t pte)
 static inline unsigned long pte_pfn(pte_t pte)
 {
 	return (pte_val(pte) & PTE_PFN_MASK) >> PAGE_SHIFT;
+}
+
+static inline u64 pte_pa(pte_t pte)
+{
+	return pte_val(pte) & PTE_PFN_MASK;
 }
 
 #define pte_page(pte)	pfn_to_page(pte_pfn(pte))
@@ -329,6 +345,11 @@ static inline pgprot_t pgprot_modify(pgprot_t oldprot, pgprot_t newprot)
 #define pte_pgprot(x) __pgprot(pte_flags(x) & PTE_FLAGS_MASK)
 
 #define canon_pgprot(p) __pgprot(pgprot_val(p) & __supported_pte_mask)
+
+/* Indicate that x86 has its own track and untrack pfn vma functions */
+#define track_pfn_vma_new track_pfn_vma_new
+#define track_pfn_vma_copy track_pfn_vma_copy
+#define untrack_pfn_vma untrack_pfn_vma
 
 #ifndef __ASSEMBLY__
 #define __HAVE_PHYS_MEM_ACCESS_PROT
