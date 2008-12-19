@@ -508,6 +508,14 @@ struct root_domain {
 #ifdef CONFIG_SMP
 	struct cpupri cpupri;
 #endif
+#if defined(CONFIG_SCHED_MC) || defined(CONFIG_SCHED_SMT)
+	/*
+	 * Preferred wake up cpu nominated by sched_mc balance that will be
+	 * used when most cpus are idle in the system indicating overall very
+	 * low system utilisation. Triggered at POWERSAVINGS_BALANCE_WAKEUP(2)
+	 */
+	unsigned int sched_mc_preferred_wakeup_cpu;
+#endif
 };
 
 /*
@@ -3268,7 +3276,7 @@ find_busiest_group(struct sched_domain *sd, int this_cpu,
 		 */
 		if ((sum_nr_running < min_nr_running) ||
 		    (sum_nr_running == min_nr_running &&
-		     cpumask_first(sched_group_cpus(group)) <
+		     cpumask_first(sched_group_cpus(group)) >
 		     cpumask_first(sched_group_cpus(group_min)))) {
 			group_min = group;
 			min_nr_running = sum_nr_running;
@@ -3284,7 +3292,7 @@ find_busiest_group(struct sched_domain *sd, int this_cpu,
 		if (sum_nr_running <= group_capacity - 1) {
 			if (sum_nr_running > leader_nr_running ||
 			    (sum_nr_running == leader_nr_running &&
-			     cpumask_first(sched_group_cpus(group)) >
+			     cpumask_first(sched_group_cpus(group)) <
 			     cpumask_first(sched_group_cpus(group_leader)))) {
 				group_leader = group;
 				leader_nr_running = sum_nr_running;
@@ -3411,6 +3419,10 @@ out_balanced:
 
 	if (this == group_leader && group_leader != group_min) {
 		*imbalance = min_load_per_task;
+		if (sched_mc_power_savings >= POWERSAVINGS_BALANCE_WAKEUP) {
+			cpu_rq(this_cpu)->rd->sched_mc_preferred_wakeup_cpu =
+				cpumask_first(sched_group_cpus(group_leader));
+		}
 		return group_min;
 	}
 #endif
@@ -3685,10 +3697,64 @@ redo:
 	}
 
 	if (!ld_moved) {
+		int active_balance;
+
 		schedstat_inc(sd, lb_failed[CPU_NEWLY_IDLE]);
 		if (!sd_idle && sd->flags & SD_SHARE_CPUPOWER &&
 		    !test_sd_parent(sd, SD_POWERSAVINGS_BALANCE))
 			return -1;
+
+		if (sched_mc_power_savings < POWERSAVINGS_BALANCE_WAKEUP)
+			return -1;
+
+		if (sd->nr_balance_failed++ < 2)
+			return -1;
+
+		/*
+		 * The only task running in a non-idle cpu can be moved to this
+		 * cpu in an attempt to completely freeup the other CPU
+		 * package. The same method used to move task in load_balance()
+		 * have been extended for load_balance_newidle() to speedup
+		 * consolidation at sched_mc=POWERSAVINGS_BALANCE_WAKEUP (2)
+		 *
+		 * The package power saving logic comes from
+		 * find_busiest_group().  If there are no imbalance, then
+		 * f_b_g() will return NULL.  However when sched_mc={1,2} then
+		 * f_b_g() will select a group from which a running task may be
+		 * pulled to this cpu in order to make the other package idle.
+		 * If there is no opportunity to make a package idle and if
+		 * there are no imbalance, then f_b_g() will return NULL and no
+		 * action will be taken in load_balance_newidle().
+		 *
+		 * Under normal task pull operation due to imbalance, there
+		 * will be more than one task in the source run queue and
+		 * move_tasks() will succeed.  ld_moved will be true and this
+		 * active balance code will not be triggered.
+		 */
+
+		/* Lock busiest in correct order while this_rq is held */
+		double_lock_balance(this_rq, busiest);
+
+		/*
+		 * don't kick the migration_thread, if the curr
+		 * task on busiest cpu can't be moved to this_cpu
+		 */
+		if (!cpu_isset(this_cpu, busiest->curr->cpus_allowed)) {
+			double_unlock_balance(this_rq, busiest);
+			all_pinned = 1;
+			return ld_moved;
+		}
+
+		if (!busiest->active_balance) {
+			busiest->active_balance = 1;
+			busiest->push_cpu = this_cpu;
+			active_balance = 1;
+		}
+
+		double_unlock_balance(this_rq, busiest);
+		if (active_balance)
+			wake_up_process(busiest->migration_thread);
+
 	} else
 		sd->nr_balance_failed = 0;
 
@@ -7929,14 +7995,25 @@ int arch_reinit_sched_domains(void)
 static ssize_t sched_power_savings_store(const char *buf, size_t count, int smt)
 {
 	int ret;
+	unsigned int level = 0;
 
-	if (buf[0] != '0' && buf[0] != '1')
+	if (sscanf(buf, "%u", &level) != 1)
+		return -EINVAL;
+
+	/*
+	 * level is always be positive so don't check for
+	 * level < POWERSAVINGS_BALANCE_NONE which is 0
+	 * What happens on 0 or 1 byte write,
+	 * need to check for count as well?
+	 */
+
+	if (level >= MAX_POWERSAVINGS_BALANCE_LEVELS)
 		return -EINVAL;
 
 	if (smt)
-		sched_smt_power_savings = (buf[0] == '1');
+		sched_smt_power_savings = level;
 	else
-		sched_mc_power_savings = (buf[0] == '1');
+		sched_mc_power_savings = level;
 
 	ret = arch_reinit_sched_domains();
 

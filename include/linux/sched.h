@@ -763,16 +763,48 @@ enum cpu_idle_type {
 #define SD_SERIALIZE		1024	/* Only a single load balancing instance */
 #define SD_WAKE_IDLE_FAR	2048	/* Gain latency sacrificing cache hit */
 
-#define BALANCE_FOR_MC_POWER	\
-	(sched_smt_power_savings ? SD_POWERSAVINGS_BALANCE : 0)
+enum powersavings_balance_level {
+	POWERSAVINGS_BALANCE_NONE = 0,  /* No power saving load balance */
+	POWERSAVINGS_BALANCE_BASIC,	/* Fill one thread/core/package
+					 * first for long running threads
+					 */
+	POWERSAVINGS_BALANCE_WAKEUP,	/* Also bias task wakeups to semi-idle
+					 * cpu package for power savings
+					 */
+	MAX_POWERSAVINGS_BALANCE_LEVELS
+};
 
-#define BALANCE_FOR_PKG_POWER	\
-	((sched_mc_power_savings || sched_smt_power_savings) ?	\
-	 SD_POWERSAVINGS_BALANCE : 0)
+extern int sched_mc_power_savings, sched_smt_power_savings;
 
-#define test_sd_parent(sd, flag)	((sd->parent &&		\
-					 (sd->parent->flags & flag)) ? 1 : 0)
+static inline int sd_balance_for_mc_power(void)
+{
+	if (sched_smt_power_savings)
+		return SD_POWERSAVINGS_BALANCE;
 
+	return 0;
+}
+
+static inline int sd_balance_for_package_power(void)
+{
+	if (sched_mc_power_savings | sched_smt_power_savings)
+		return SD_POWERSAVINGS_BALANCE;
+
+	return 0;
+}
+
+/*
+ * Optimise SD flags for power savings:
+ * SD_BALANCE_NEWIDLE helps agressive task consolidation and power savings.
+ * Keep default SD flags if sched_{smt,mc}_power_saving=0
+ */
+
+static inline int sd_power_saving_flags(void)
+{
+	if (sched_mc_power_savings | sched_smt_power_savings)
+		return SD_BALANCE_NEWIDLE;
+
+	return 0;
+}
 
 struct sched_group {
 	struct sched_group *next;	/* Must be a circular list */
@@ -887,6 +919,15 @@ static inline struct cpumask *sched_domain_span(struct sched_domain *sd)
 extern void partition_sched_domains(int ndoms_new, struct cpumask *doms_new,
 				    struct sched_domain_attr *dattr_new);
 extern int arch_reinit_sched_domains(void);
+
+/* Test a flag in parent sched domain */
+static inline int test_sd_parent(struct sched_domain *sd, int flag)
+{
+	if (sd->parent && (sd->parent->flags & flag))
+		return 1;
+
+	return 0;
+}
 
 #else /* CONFIG_SMP */
 
@@ -2270,8 +2311,6 @@ __trace_special(void *__tr, void *__data,
 
 extern long sched_setaffinity(pid_t pid, const struct cpumask *new_mask);
 extern long sched_getaffinity(pid_t pid, struct cpumask *mask);
-
-extern int sched_mc_power_savings, sched_smt_power_savings;
 
 extern void normalize_rt_tasks(void);
 
