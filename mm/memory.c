@@ -99,50 +99,6 @@ int randomize_va_space __read_mostly =
 					2;
 #endif
 
-#ifndef track_pfn_vma_new
-/*
- * Interface that can be used by architecture code to keep track of
- * memory type of pfn mappings (remap_pfn_range, vm_insert_pfn)
- *
- * track_pfn_vma_new is called when a _new_ pfn mapping is being established
- * for physical range indicated by pfn and size.
- */
-int track_pfn_vma_new(struct vm_area_struct *vma, pgprot_t prot,
-			unsigned long pfn, unsigned long size)
-{
-	return 0;
-}
-#endif
-
-#ifndef track_pfn_vma_copy
-/*
- * Interface that can be used by architecture code to keep track of
- * memory type of pfn mappings (remap_pfn_range, vm_insert_pfn)
- *
- * track_pfn_vma_copy is called when vma that is covering the pfnmap gets
- * copied through copy_page_range().
- */
-int track_pfn_vma_copy(struct vm_area_struct *vma)
-{
-	return 0;
-}
-#endif
-
-#ifndef untrack_pfn_vma
-/*
- * Interface that can be used by architecture code to keep track of
- * memory type of pfn mappings (remap_pfn_range, vm_insert_pfn)
- *
- * untrack_pfn_vma is called while unmapping a pfnmap for a region.
- * untrack can be called for a specific region indicated by pfn and size or
- * can be for the entire vma (in which case size can be zero).
- */
-void untrack_pfn_vma(struct vm_area_struct *vma, unsigned long pfn,
-			unsigned long size)
-{
-}
-#endif
-
 static int __init disable_randmaps(char *s)
 {
 	randomize_va_space = 0;
@@ -713,7 +669,7 @@ int copy_page_range(struct mm_struct *dst_mm, struct mm_struct *src_mm,
 	if (is_vm_hugetlb_page(vma))
 		return copy_hugetlb_page_range(dst_mm, src_mm, vma);
 
-	if (is_pfn_mapping(vma)) {
+	if (unlikely(is_pfn_mapping(vma))) {
 		/*
 		 * We do not free on error cases below as remove_vma
 		 * gets called on error from higher level routine
@@ -969,7 +925,7 @@ unsigned long unmap_vmas(struct mmu_gather **tlbp,
 		if (vma->vm_flags & VM_ACCOUNT)
 			*nr_accounted += (end - start) >> PAGE_SHIFT;
 
-		if (is_pfn_mapping(vma))
+		if (unlikely(is_pfn_mapping(vma)))
 			untrack_pfn_vma(vma, 0, 0);
 
 		while (start != end) {
@@ -1166,49 +1122,6 @@ no_page_table:
 		BUG_ON(flags & FOLL_WRITE);
 	}
 	return page;
-}
-
-int follow_pfnmap_pte(struct vm_area_struct *vma, unsigned long address,
-			pte_t *ret_ptep)
-{
-	pgd_t *pgd;
-	pud_t *pud;
-	pmd_t *pmd;
-	pte_t *ptep, pte;
-	spinlock_t *ptl;
-	struct page *page;
-	struct mm_struct *mm = vma->vm_mm;
-
-	if (!is_pfn_mapping(vma))
-		goto err;
-
-	page = NULL;
-	pgd = pgd_offset(mm, address);
-	if (pgd_none(*pgd) || unlikely(pgd_bad(*pgd)))
-		goto err;
-
-	pud = pud_offset(pgd, address);
-	if (pud_none(*pud) || unlikely(pud_bad(*pud)))
-		goto err;
-
-	pmd = pmd_offset(pud, address);
-	if (pmd_none(*pmd) || unlikely(pmd_bad(*pmd)))
-		goto err;
-
-	ptep = pte_offset_map_lock(mm, pmd, address, &ptl);
-
-	pte = *ptep;
-	if (!pte_present(pte))
-		goto err_unlock;
-
-	*ret_ptep = pte;
-	pte_unmap_unlock(ptep, ptl);
-	return 0;
-
-err_unlock:
-	pte_unmap_unlock(ptep, ptl);
-err:
-	return -EINVAL;
 }
 
 /* Can we do the FOLL_ANON optimization? */
@@ -2981,9 +2894,9 @@ int in_gate_area_no_task(unsigned long addr)
 #endif	/* __HAVE_ARCH_GATE_AREA */
 
 #ifdef CONFIG_HAVE_IOREMAP_PROT
-static resource_size_t follow_phys(struct vm_area_struct *vma,
-			unsigned long address, unsigned int flags,
-			unsigned long *prot)
+int follow_phys(struct vm_area_struct *vma,
+		unsigned long address, unsigned int flags,
+		unsigned long *prot, resource_size_t *phys)
 {
 	pgd_t *pgd;
 	pud_t *pud;
@@ -2992,24 +2905,26 @@ static resource_size_t follow_phys(struct vm_area_struct *vma,
 	spinlock_t *ptl;
 	resource_size_t phys_addr = 0;
 	struct mm_struct *mm = vma->vm_mm;
+	int ret = -EINVAL;
 
-	VM_BUG_ON(!(vma->vm_flags & (VM_IO | VM_PFNMAP)));
+	if (!(vma->vm_flags & (VM_IO | VM_PFNMAP)))
+		goto out;
 
 	pgd = pgd_offset(mm, address);
 	if (pgd_none(*pgd) || unlikely(pgd_bad(*pgd)))
-		goto no_page_table;
+		goto out;
 
 	pud = pud_offset(pgd, address);
 	if (pud_none(*pud) || unlikely(pud_bad(*pud)))
-		goto no_page_table;
+		goto out;
 
 	pmd = pmd_offset(pud, address);
 	if (pmd_none(*pmd) || unlikely(pmd_bad(*pmd)))
-		goto no_page_table;
+		goto out;
 
 	/* We cannot handle huge page PFN maps. Luckily they don't exist. */
 	if (pmd_huge(*pmd))
-		goto no_page_table;
+		goto out;
 
 	ptep = pte_offset_map_lock(mm, pmd, address, &ptl);
 	if (!ptep)
@@ -3024,13 +2939,13 @@ static resource_size_t follow_phys(struct vm_area_struct *vma,
 	phys_addr <<= PAGE_SHIFT; /* Shift here to avoid overflow on PAE */
 
 	*prot = pgprot_val(pte_pgprot(pte));
+	*phys = phys_addr;
+	ret = 0;
 
 unlock:
 	pte_unmap_unlock(ptep, ptl);
 out:
-	return phys_addr;
-no_page_table:
-	return 0;
+	return ret;
 }
 
 int generic_access_phys(struct vm_area_struct *vma, unsigned long addr,
@@ -3041,12 +2956,7 @@ int generic_access_phys(struct vm_area_struct *vma, unsigned long addr,
 	void *maddr;
 	int offset = addr & (PAGE_SIZE-1);
 
-	if (!(vma->vm_flags & (VM_IO | VM_PFNMAP)))
-		return -EINVAL;
-
-	phys_addr = follow_phys(vma, addr, write, &prot);
-
-	if (!phys_addr)
+	if (follow_phys(vma, addr, write, &prot, &phys_addr))
 		return -EINVAL;
 
 	maddr = ioremap_prot(phys_addr, PAGE_SIZE, prot);
