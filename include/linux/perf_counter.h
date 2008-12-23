@@ -14,6 +14,7 @@
 #define _LINUX_PERF_COUNTER_H
 
 #include <asm/atomic.h>
+#include <asm/perf_counter.h>
 
 #include <linux/list.h>
 #include <linux/mutex.h>
@@ -35,14 +36,15 @@ enum hw_event_types {
 	/*
 	 * Common hardware events, generalized by the kernel:
 	 */
-	PERF_COUNT_CYCLES		=  0,
+	PERF_COUNT_CPU_CYCLES		=  0,
 	PERF_COUNT_INSTRUCTIONS		=  1,
 	PERF_COUNT_CACHE_REFERENCES	=  2,
 	PERF_COUNT_CACHE_MISSES		=  3,
 	PERF_COUNT_BRANCH_INSTRUCTIONS	=  4,
 	PERF_COUNT_BRANCH_MISSES	=  5,
+	PERF_COUNT_BUS_CYCLES		=  6,
 
-	PERF_HW_EVENTS_MAX		=  6,
+	PERF_HW_EVENTS_MAX		=  7,
 
 	/*
 	 * Special "software" counters provided by the kernel, even if
@@ -127,9 +129,9 @@ struct perf_counter;
  * struct hw_perf_counter_ops - performance counter hw ops
  */
 struct hw_perf_counter_ops {
-	void (*hw_perf_counter_enable)	(struct perf_counter *counter);
-	void (*hw_perf_counter_disable)	(struct perf_counter *counter);
-	void (*hw_perf_counter_read)	(struct perf_counter *counter);
+	int (*enable)			(struct perf_counter *counter);
+	void (*disable)			(struct perf_counter *counter);
+	void (*read)			(struct perf_counter *counter);
 };
 
 /**
@@ -163,7 +165,6 @@ struct perf_counter {
 	struct task_struct		*task;
 	struct file			*filp;
 
-	unsigned int			nr_inherited;
 	struct perf_counter		*parent;
 	/*
 	 * Protect attach/detach:
@@ -218,8 +219,6 @@ struct perf_cpu_context {
 extern int perf_max_counters;
 
 #ifdef CONFIG_PERF_COUNTERS
-extern void
-perf_counter_show(struct perf_counter *counter, char *str, int trace);
 extern const struct hw_perf_counter_ops *
 hw_perf_counter_init(struct perf_counter *counter);
 
@@ -236,8 +235,6 @@ extern int perf_counter_task_disable(void);
 extern int perf_counter_task_enable(void);
 
 #else
-static inline void
-perf_counter_show(struct perf_counter *counter, char *str, int trace)   { }
 static inline void
 perf_counter_task_sched_in(struct task_struct *task, int cpu)		{ }
 static inline void

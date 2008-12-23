@@ -32,7 +32,7 @@
 #include <linux/dmar.h>
 #include <linux/ftrace.h>
 
-#include <asm/intel_arch_perfmon.h>
+#include <asm/perf_counter.h>
 #include <asm/atomic.h>
 #include <asm/smp.h>
 #include <asm/mtrr.h>
