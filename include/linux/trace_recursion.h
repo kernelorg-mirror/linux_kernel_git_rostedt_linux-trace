@@ -58,13 +58,6 @@ enum {
 	TRACE_IRQ_BIT,
 
 	/*
-	 * To implement set_graph_notrace, if this bit is set, we ignore
-	 * function graph tracing of called functions, until the return
-	 * function is called to clear it.
-	 */
-	TRACE_GRAPH_NOTRACE_BIT,
-
-	/*
 	 * When transitioning between context, the preempt_count() may
 	 * not be correct. Allow for a single recursion to cover this case.
 	 */
