@@ -1170,7 +1170,7 @@ ftrace_event_write(struct file *file, const char __user *ubuf,
 	if (!cnt)
 		return 0;
 
-	ret = tracing_update_buffers();
+	ret = tracing_update_buffers(tr);
 	if (ret < 0)
 		return ret;
 
@@ -1401,18 +1401,20 @@ event_enable_write(struct file *filp, const char __user *ubuf, size_t cnt,
 	if (ret)
 		return ret;
 
-	ret = tracing_update_buffers();
-	if (ret < 0)
-		return ret;
-
 	switch (val) {
 	case 0:
 	case 1:
 		ret = -ENODEV;
 		mutex_lock(&event_mutex);
 		file = event_file_data(filp);
-		if (likely(file && !(file->flags & EVENT_FILE_FL_FREED)))
+		if (likely(file && !(file->flags & EVENT_FILE_FL_FREED))) {
+			ret = tracing_update_buffers(file->tr);
+			if (ret < 0) {
+				mutex_unlock(&event_mutex);
+				return ret;
+			}
 			ret = ftrace_event_enable_disable(file, val);
+		}
 		mutex_unlock(&event_mutex);
 		break;
 
@@ -1486,7 +1488,7 @@ system_enable_write(struct file *filp, const char __user *ubuf, size_t cnt,
 	if (ret)
 		return ret;
 
-	ret = tracing_update_buffers();
+	ret = tracing_update_buffers(dir->tr);
 	if (ret < 0)
 		return ret;
 
@@ -1958,7 +1960,7 @@ event_pid_write(struct file *filp, const char __user *ubuf,
 	if (!cnt)
 		return 0;
 
-	ret = tracing_update_buffers();
+	ret = tracing_update_buffers(tr);
 	if (ret < 0)
 		return ret;
 
@@ -3549,7 +3551,7 @@ static char bootup_event_buf[COMMAND_LINE_SIZE] __initdata;
 static __init int setup_trace_event(char *str)
 {
 	strlcpy(bootup_event_buf, str, COMMAND_LINE_SIZE);
-	ring_buffer_expanded = true;
+	trace_set_ring_buffer_expanded(NULL);
 	disable_tracing_selftest("running event tracing");
 
 	return 1;
