@@ -101,6 +101,8 @@ struct dentry *tracefs_create_instance_dir(const char *name, struct dentry *pare
 
 bool tracefs_initialized(void);
 
+extern const struct file_operations eventfs_show_dentry_fops;
+
 #endif /* CONFIG_TRACING */
 
 #endif

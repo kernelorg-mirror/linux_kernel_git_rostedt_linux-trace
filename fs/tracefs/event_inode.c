@@ -30,7 +30,7 @@
  * if ei->is_freed is not set. When ei->is_freed is set, the dentry
  * is on its way to being freed after the last dput() is made on it.
  */
-static DEFINE_MUTEX(eventfs_mutex);
+DEFINE_MUTEX(eventfs_mutex);
 
 /*
  * The eventfs_inode (ei) itself is protected by SRCU. It is released from

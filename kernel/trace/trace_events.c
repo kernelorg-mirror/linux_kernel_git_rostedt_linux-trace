@@ -3802,6 +3802,9 @@ create_event_toplevel_files(struct dentry *parent, struct trace_array *tr)
 		return -ENOMEM;
 	}
 
+	trace_create_file("show_events_dentries", TRACE_MODE_READ, parent, e_events,
+			  &eventfs_show_dentry_fops);
+
 	/* There are not as crucial, just warn if they are not created */
 
 	trace_create_file("set_event_pid", TRACE_MODE_WRITE, parent,

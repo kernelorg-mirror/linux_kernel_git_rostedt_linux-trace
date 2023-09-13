@@ -2,6 +2,8 @@
 #ifndef _TRACEFS_INTERNAL_H
 #define _TRACEFS_INTERNAL_H
 
+#include <linux/mutex.h>
+
 enum {
 	TRACEFS_EVENT_INODE		= BIT(1),
 	TRACEFS_EVENT_TOP_INODE		= BIT(2),
@@ -73,6 +75,8 @@ static inline struct tracefs_inode *get_tracefs(const struct inode *inode)
 {
 	return container_of(inode, struct tracefs_inode, vfs_inode);
 }
+
+extern struct mutex eventfs_mutex;
 
 struct dentry *tracefs_start_creating(const char *name, struct dentry *parent);
 struct dentry *tracefs_end_creating(struct dentry *dentry);
