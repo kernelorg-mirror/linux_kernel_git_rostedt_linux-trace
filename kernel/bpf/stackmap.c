@@ -314,8 +314,7 @@ BPF_CALL_3(bpf_get_stackid, struct pt_regs *, regs, struct bpf_map *, map,
 	if (max_depth > sysctl_perf_event_max_stack)
 		max_depth = sysctl_perf_event_max_stack;
 
-	trace = get_perf_callchain(regs, kernel, user, max_depth,
-				   false, false);
+	trace = get_perf_callchain(regs, kernel, user, max_depth, false);
 
 	if (unlikely(!trace))
 		/* couldn't fetch the stack trace */
@@ -430,10 +429,8 @@ static long __bpf_get_stack(struct pt_regs *regs, struct task_struct *task,
 	if (task && user && !user_mode(regs))
 		goto err_fault;
 
-	/* get_perf_callchain does not support crosstask user stack walking
-	 * but returns an empty stack instead of NULL.
-	 */
-	if (crosstask && user) {
+	/* get_perf_callchain() does not support crosstask stack walking */
+	if (crosstask) {
 		err = -EOPNOTSUPP;
 		goto clear;
 	}
@@ -451,8 +448,7 @@ static long __bpf_get_stack(struct pt_regs *regs, struct task_struct *task,
 	else if (kernel && task)
 		trace = get_callchain_entry_for_task(task, max_depth);
 	else
-		trace = get_perf_callchain(regs, kernel, user, max_depth,
-					   crosstask, false);
+		trace = get_perf_callchain(regs, kernel, user, max_depth,false);
 
 	if (unlikely(!trace) || trace->nr < skip) {
 		if (may_fault)
