@@ -763,6 +763,15 @@ static bool rb_time_cmpxchg(rb_time_t *t, u64 expect, u64 set)
 #endif
 
 /*
+ * Returns true if t == expect, and if possible will update with set,
+ * but t is not guaranteed to be updated even if this returns true
+ */
+static bool rb_time_cmp_and_update(rb_time_t *t, u64 expect, u64 set)
+{
+	return rb_time_cmpxchg(t, expect, set);
+}
+
+/*
  * Enable this to make sure that the event passed to
  * ring_buffer_event_time_stamp() is not committed and also
  * is on the buffer that it passed in.
@@ -3622,9 +3631,17 @@ __rb_reserve_next(struct ring_buffer_per_cpu *cpu_buffer,
 		barrier();
  /*E*/		if (write == (local_read(&tail_page->write) & RB_WRITE_MASK) &&
 		    info->after < ts &&
-		    rb_time_cmpxchg(&cpu_buffer->write_stamp,
-				    info->after, ts)) {
-			/* Nothing came after this event between C and E */
+		    rb_time_cmp_and_update(&cpu_buffer->write_stamp,
+					   info->after, ts)) {
+			/*
+			 * Nothing came after this event between C and E it is
+			 * safe to use info->after for the delta.
+			 * The above rb_time_cmp_and_update() may or may not
+			 * have updated the write_stamp. If it did not then
+			 * the next event will simply add an absolute timestamp
+			 * as the write_stamp will be different than the
+			 * before_stamp.
+			 */
 			info->delta = ts - info->after;
 		} else {
 			/*
