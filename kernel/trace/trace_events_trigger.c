@@ -587,21 +587,12 @@ out:
 	return ret;
 }
 
-/**
- * unregister_trigger - Generic event_command @unreg implementation
- * @glob: The raw string used to register the trigger
- * @ops: The trigger ops associated with the trigger
- * @test: Trigger-specific data used to find the trigger to remove
- * @file: The trace_event_file associated with the event
- *
- * Common implementation for event trigger unregistration.
- *
- * Usually used directly as the @unreg method in event command
- * implementations.
+/*
+ * True if the trigger was found and unregistered, else false.
  */
-static void unregister_trigger(char *glob, struct event_trigger_ops *ops,
-			       struct event_trigger_data *test,
-			       struct trace_event_file *file)
+static bool try_unregister_trigger(char *glob, struct event_trigger_ops *ops,
+				   struct event_trigger_data *test,
+				   struct trace_event_file *file)
 {
 	struct event_trigger_data *data;
 	bool unregistered = false;
@@ -618,8 +609,125 @@ static void unregister_trigger(char *glob, struct event_trigger_ops *ops,
 		}
 	}
 
-	if (unregistered && data->ops->free)
-		data->ops->free(data->ops, data);
+	if (unregistered && data) {
+		if (data->ops->free)
+			data->ops->free(data->ops, data);
+
+		return true;
+	}
+
+	return false;
+}
+
+/**
+ * unregister_trigger - Generic event_command @unreg implementation
+ * @glob: The raw string used to register the trigger
+ * @ops: The trigger ops associated with the trigger
+ * @test: Trigger-specific data used to find the trigger to remove
+ * @file: The trace_event_file associated with the event
+ *
+ * Common implementation for event trigger unregistration.
+ *
+ * Usually used directly as the @unreg method in event command
+ * implementations.
+ */
+static void unregister_trigger(char *glob, struct event_trigger_ops *ops,
+			       struct event_trigger_data *test,
+			       struct trace_event_file *file)
+{
+	try_unregister_trigger(glob, ops, test, file);
+}
+
+/*
+ * Event trigger parsing helper functions.
+ *
+ * These functions help make it easier to write an event trigger
+ * parsing function i.e. the struct event_command.parse() callback
+ * function responsible for parsing and registering a trigger command
+ * written to the 'trigger' file.
+ *
+ * A trigger command (or just 'trigger' for short) takes the form:
+ *   [trigger] [if filter]
+ *
+ * The struct event_command.parse() callback (and other struct
+ * event_command functions) refer to several components of a trigger
+ * command.  Those same components are referenced by the event trigger
+ * parsing helper functions defined below.  These components are:
+ *
+ *   cmd               - the trigger command name
+ *   glob              - the trigger command name optionally prefaced with '!'
+ *   param_and_filter  - text following cmd and ':'
+ *   param             - text following cmd and ':' and stripped of filter
+ *   filter            - the optional filter text following (and including) 'if'
+ *
+ * To illustrate the use of these componenents, here are some concrete
+ * examples. For the following triggers:
+ *
+ *   echo 'traceon:5 if pid == 0' > trigger
+ *     - 'traceon' is both cmd and glob
+ *     - '5 if pid == 0' is the param_and_filter
+ *     - '5' is the param
+ *     - 'if pid == 0' is the filter
+ *
+ *   echo 'enable_event:sys:event:n' > trigger
+ *     - 'enable_event' is both cmd and glob
+ *     - 'sys:event:n' is the param_and_filter
+ *     - 'sys:event:n' is the param
+ *     - there is no filter
+ *
+ *   echo 'hist:keys=pid if prio > 50' > trigger
+ *     - 'hist' is both cmd and glob
+ *     - 'keys=pid if prio > 50' is the param_and_filter
+ *     - 'keys=pid' is the param
+ *     - 'if prio > 50' is the filter
+ *
+ *   echo '!enable_event:sys:event:n' > trigger
+ *     - 'enable_event' the cmd
+ *     - '!enable_event' is the glob
+ *     - 'sys:event:n' is the param_and_filter
+ *     - 'sys:event:n' is the param
+ *     - there is no filter
+ *
+ *   echo 'traceoff' > trigger
+ *     - 'traceoff' is both cmd and glob
+ *     - there is no param_and_filter
+ *     - there is no param
+ *     - there is no filter
+ *
+ * There are a few different categories of event trigger covered by
+ * these helpers:
+ *
+ *  - triggers that don't require a parameter e.g. traceon
+ *  - triggers that do require a parameter e.g. enable_event and hist
+ *  - triggers that though they may not require a param may support an
+ *    optional 'n' param (n = number of times the trigger should fire)
+ *    e.g.: traceon:5 or enable_event:sys:event:n
+ *  - triggers that do not support an 'n' param e.g. hist
+ *
+ * These functions can be used or ignored as necessary - it all
+ * depends on the complexity of the trigger, and the granularity of
+ * the functions supported reflects the fact that some implementations
+ * may need to customize certain aspects of their implementations and
+ * won't need certain functions.  For instance, the hist trigger
+ * implementation doesn't use event_trigger_separate_filter() because
+ * it has special requirements for handling the filter.
+ */
+
+/**
+ * event_trigger_check_remove - check whether an event trigger specifies remove
+ * @glob: The trigger command string, with optional remove(!) operator
+ *
+ * The event trigger callback implementations pass in 'glob' as a
+ * parameter.  This is the command name either with or without a
+ * remove(!)  operator.  This function simply parses the glob and
+ * determines whether the command corresponds to a trigger removal or
+ * a trigger addition.
+ *
+ * Return: true if this is a remove command, false otherwise
+ */
+bool event_trigger_check_remove(const char *glob)
+{
+	return (glob && glob[0] == '!') ? true : false;
 }
 
 /**
@@ -1161,10 +1269,18 @@ register_snapshot_trigger(char *glob, struct event_trigger_ops *ops,
 			  struct event_trigger_data *data,
 			  struct trace_event_file *file)
 {
-	if (tracing_alloc_snapshot_instance(file->tr) != 0)
+	if (tracing_arm_snapshot(file->tr) != 0)
 		return 0;
 
 	return register_trigger(glob, ops, data, file);
+}
+
+static void unregister_snapshot_trigger(char *glob, struct event_trigger_ops *ops,
+					struct event_trigger_data *data,
+					struct trace_event_file *file)
+{
+	if (try_unregister_trigger(glob, ops, data, file))
+		tracing_disarm_snapshot(file->tr);
 }
 
 static int
@@ -1200,7 +1316,7 @@ static struct event_command trigger_snapshot_cmd = {
 	.trigger_type		= ETT_SNAPSHOT,
 	.func			= event_trigger_callback,
 	.reg			= register_snapshot_trigger,
-	.unreg			= unregister_trigger,
+	.unreg			= unregister_snapshot_trigger,
 	.get_trigger_ops	= snapshot_get_trigger_ops,
 	.set_filter		= set_trigger_filter,
 };
