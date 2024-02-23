@@ -1269,10 +1269,15 @@ register_snapshot_trigger(char *glob, struct event_trigger_ops *ops,
 			  struct event_trigger_data *data,
 			  struct trace_event_file *file)
 {
+	int ret;
+
 	if (tracing_arm_snapshot(file->tr) != 0)
 		return 0;
 
-	return register_trigger(glob, ops, data, file);
+	ret = register_trigger(glob, ops, data, file);
+	if (ret < 0)
+		tracing_disarm_snapshot(file->tr);
+	return ret;
 }
 
 static void unregister_snapshot_trigger(char *glob, struct event_trigger_ops *ops,
