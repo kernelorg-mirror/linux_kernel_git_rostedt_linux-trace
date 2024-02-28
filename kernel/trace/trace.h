@@ -324,6 +324,10 @@ struct trace_array {
 	struct irq_work		fsnotify_irqwork;
 #endif
 #endif
+	/* The below is for memory mapped ring buffer */
+	unsigned long		range_addr_start;
+	unsigned long		range_addr_size;
+
 	struct trace_pid_list	__rcu *filtered_pids;
 	struct trace_pid_list	__rcu *filtered_no_pids;
 	/*
