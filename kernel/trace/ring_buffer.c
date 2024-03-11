@@ -905,18 +905,19 @@ static bool rb_wait_once(void *data)
  * as data is added to any of the @buffer's cpu buffers. Otherwise
  * it will wait for data to be added to a specific cpu buffer.
  */
-int ring_buffer_wait(struct trace_buffer *buffer, int cpu, int full)
+int ring_buffer_wait(struct trace_buffer *buffer, int cpu, int full,
+		     ring_buffer_cond_fn cond, void *data)
 {
 	struct ring_buffer_per_cpu *cpu_buffer;
 	struct wait_queue_head *waitq;
-	ring_buffer_cond_fn cond;
 	struct rb_irq_work *work;
-	void *data;
 	long once = 0;
 	int ret = 0;
 
-	cond = rb_wait_once;
-	data = &once;
+	if (!cond) {
+		cond = rb_wait_once;
+		data = &once;
+	}
 
 	/*
 	 * Depending on what the caller is waiting for, either any
