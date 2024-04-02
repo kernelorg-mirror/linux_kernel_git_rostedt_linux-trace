@@ -2111,6 +2111,102 @@ void __init memblock_free_all(void)
 	totalram_pages_add(pages);
 }
 
+/* For wildcard memory requests, have a table to find them later */
+#define MEMMAP_MAX_MAPS		8
+#define MEMMAP_NAME_SIZE	16
+struct memmap_map {
+	char			name[MEMMAP_NAME_SIZE];
+	u64			start;
+	unsigned long		size;
+};
+static struct memmap_map memmap_list[MEMMAP_MAX_MAPS] __initdata;
+static int memmap_size				__initdata;
+
+/* Add wildcard region with a lookup name */
+static int __init memmap_add(u64 start, unsigned long size, const char *name)
+{
+	struct memmap_map *map;
+
+	if (!name || !name[0] || strlen(name) >= MEMMAP_NAME_SIZE)
+		return -EINVAL;
+
+	if (memmap_size >= MEMMAP_MAX_MAPS)
+		return -1;
+
+	map = &memmap_list[memmap_size++];
+	map->start = start;
+	map->size = size;
+	strcpy(map->name, name);
+	return 0;
+}
+
+/**
+ * memmap_named - Find a wildcard region with a given name
+ * @name: The name that is attached to a wildcard region
+ * @start: If found, holds the start address
+ * @size: If found, holds the size of the address.
+ *
+ * Returns: 1 if found or 0 if not found.
+ */
+int __init memmap_named(const char *name, u64 *start, unsigned long *size)
+{
+	struct memmap_map *map;
+	int i;
+
+	for (i = 0; i < memmap_size; i++) {
+		map = &memmap_list[i];
+		if (!map->size)
+			continue;
+		if (strcmp(name, map->name) == 0) {
+			*start = map->start;
+			*size = map->size;
+			return 1;
+		}
+	}
+	return 0;
+}
+
+/*
+ * Parse early_reserve_mem=nn:align:name
+ */
+static int __init early_reserve_mem(char *p)
+{
+	phys_addr_t start, size, align;
+	char *oldp;
+	int err;
+
+	if (!p)
+		return -EINVAL;
+
+	oldp = p;
+	size = memparse(p, &p);
+	if (p == oldp)
+		return -EINVAL;
+
+	if (*p != ':')
+		return -EINVAL;
+
+	align = memparse(p+1, &p);
+	if (*p != ':')
+		return -EINVAL;
+
+	start = memblock_phys_alloc(size, align);
+	if (!start)
+		return -ENOMEM;
+
+	p++;
+	err = memmap_add(start, size, p);
+	if (err) {
+		memblock_free(start, size);
+		return err;
+	}
+
+	p += strlen(p);
+
+	return *p == '\0' ? 0: -EINVAL;
+}
+__setup("early_reserve_mem=", early_reserve_mem);
+
 #if defined(CONFIG_DEBUG_FS) && defined(CONFIG_ARCH_KEEP_MEMBLOCK)
 
 static int memblock_debug_show(struct seq_file *m, void *private)
