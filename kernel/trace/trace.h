@@ -327,6 +327,8 @@ struct trace_array {
 	/* The below is for memory mapped ring buffer */
 	unsigned long		range_addr_start;
 	unsigned long		range_addr_size;
+	long			text_delta;
+	long			data_delta;
 
 	struct trace_pid_list	__rcu *filtered_pids;
 	struct trace_pid_list	__rcu *filtered_no_pids;
