@@ -1640,7 +1640,8 @@ static int __rb_allocate_pages(struct ring_buffer_per_cpu *cpu_buffer,
 
 		list_add(&bpage->list, pages);
 
-		page = alloc_pages_node(cpu_to_node(cpu_buffer->cpu), mflags, 0);
+		page = alloc_pages_node(cpu_to_node(cpu_buffer->cpu),
+					mflags | __GFP_COMP | __GFP_ZERO, 0);
 		if (!page)
 			goto free_pages;
 		bpage->page = page_address(page);
@@ -1722,7 +1723,8 @@ rb_allocate_cpu_buffer(struct trace_buffer *buffer, long nr_pages, int cpu)
 	rb_check_bpage(cpu_buffer, bpage);
 
 	cpu_buffer->reader_page = bpage;
-	page = alloc_pages_node(cpu_to_node(cpu), GFP_KERNEL, 0);
+
+	page = alloc_pages_node(cpu_to_node(cpu), GFP_KERNEL | __GFP_COMP | __GFP_ZERO, 0);
 	if (!page)
 		goto fail_free_reader;
 	bpage->page = page_address(page);
@@ -5555,7 +5557,7 @@ void *ring_buffer_alloc_read_page(struct trace_buffer *buffer, int cpu)
 		goto out;
 
 	page = alloc_pages_node(cpu_to_node(cpu),
-				GFP_KERNEL | __GFP_NORETRY, 0);
+				GFP_KERNEL | __GFP_NORETRY | __GFP_COMP | __GFP_ZERO, 0);
 	if (!page)
 		return ERR_PTR(-ENOMEM);
 
