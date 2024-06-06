@@ -3304,5 +3304,7 @@ static inline int seal_check_future_write(int seals, struct vm_area_struct *vma)
 	return 0;
 }
 
+int reserve_mem_find_by_name(const char *name, unsigned long *start, unsigned long *size);
+
 #endif /* __KERNEL__ */
 #endif /* _LINUX_MM_H */
