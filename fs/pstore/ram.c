@@ -21,6 +21,7 @@
 #include <linux/pstore_ram.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
+#include <linux/mm.h>
 #include "internal.h"
 
 #define RAMOOPS_KERNMSG_HDR "===="
@@ -47,6 +48,11 @@ static unsigned long long mem_address;
 module_param_hw(mem_address, ullong, other, 0400);
 MODULE_PARM_DESC(mem_address,
 		"start of reserved RAM used to store oops/panic logs");
+
+static char *mem_name;
+module_param_named(mem_name, mem_name, charp, 0400);
+MODULE_PARM_DESC(mem_name,
+		"name of kernel param that holds addr (builtin only)");
 
 static ulong mem_size;
 module_param(mem_size, ulong, 0400);
@@ -909,6 +915,16 @@ static inline void ramoops_unregister_dummy(void)
 static void __init ramoops_register_dummy(void)
 {
 	struct ramoops_platform_data pdata;
+
+	if (mem_name) {
+		unsigned long start;
+		unsigned long size;
+
+		if (reserve_mem_find_by_name(mem_name, &start, &size)) {
+			mem_address = start;
+			mem_size = size;
+		}
+	}
 
 	/*
 	 * Prepare a dummy platform data structure to carry the module
