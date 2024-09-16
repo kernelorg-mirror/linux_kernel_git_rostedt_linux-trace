@@ -12,6 +12,7 @@
 #include <linux/resume_user_mode.h>
 #include <linux/tick.h>
 #include <linux/kmsan.h>
+#include <linux/unwind_user_deferred.h>
 
 #include <asm/entry-common.h>
 
@@ -111,6 +112,8 @@ static __always_inline void enter_from_user_mode(struct pt_regs *regs)
 
 	CT_WARN_ON(__ct_state() != CT_STATE_USER);
 	user_exit_irqoff();
+
+	unwind_enter_from_user_mode();
 
 	instrumentation_begin();
 	kmsan_unpoison_entry_regs(regs);

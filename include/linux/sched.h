@@ -47,6 +47,7 @@
 #include <linux/livepatch_sched.h>
 #include <linux/uidgid_types.h>
 #include <asm/kmap_size.h>
+#include <linux/unwind_user_deferred_types.h>
 
 /* task_struct member predeclarations (sorted alphabetically): */
 struct audit_context;
@@ -1601,6 +1602,10 @@ struct task_struct {
 
 #ifdef CONFIG_USER_EVENTS
 	struct user_event_mm		*user_event_mm;
+#endif
+
+#ifdef CONFIG_UNWIND_USER
+	struct unwind_task_info		unwind_task_info;
 #endif
 
 	/*
