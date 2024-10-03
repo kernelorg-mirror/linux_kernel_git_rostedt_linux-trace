@@ -1278,6 +1278,56 @@ static struct trace_event trace_stack_event = {
 };
 
 /* TRACE_USER_STACK */
+static enum print_line_t trace_user_unwind_stack_print(struct trace_iterator *iter,
+						int flags, struct trace_event *event)
+{
+	struct userunwind_stack_entry *field;
+	struct trace_seq *s = &iter->seq;
+	unsigned long *caller;
+	unsigned int offset;
+	unsigned int len;
+	unsigned int i;
+
+	trace_assign_type(field, iter->ent);
+
+	trace_seq_puts(s, "<user stack unwind>\n");
+
+	trace_seq_printf(s, "cookie=%llx\n", field->cookie);
+
+	/* The stack field is a dynamic pointer */
+	offset = field->__data_loc_stack;
+	len = offset >> 16;
+	offset = offset & 0xffff;
+
+	caller = (void *)iter->ent + offset;
+
+	for (i = 0; i < len; i += sizeof(long)) {
+		unsigned long ip = caller[i];
+
+		if (!ip || trace_seq_has_overflowed(s))
+			break;
+
+		trace_seq_puts(s, " => ");
+		seq_print_user_ip(s, NULL, ip, flags);
+		trace_seq_putc(s, '\n');
+	}
+
+	return trace_handle_return(s);
+}
+
+static enum print_line_t trace_user_unwind_cookie_print(struct trace_iterator *iter,
+						 int flags, struct trace_event *event)
+{
+	struct userunwind_cookie_entry *field;
+	struct trace_seq *s = &iter->seq;
+
+	trace_assign_type(field, iter->ent);
+
+	trace_seq_printf(s, "cookie=%llx\n", field->cookie);
+
+	return trace_handle_return(s);
+}
+
 static enum print_line_t trace_user_stack_print(struct trace_iterator *iter,
 						int flags, struct trace_event *event)
 {
@@ -1320,6 +1370,24 @@ static enum print_line_t trace_user_stack_print(struct trace_iterator *iter,
 
 	return trace_handle_return(s);
 }
+
+static struct trace_event_functions trace_userunwind_stack_funcs = {
+	.trace		= trace_user_unwind_stack_print,
+};
+
+static struct trace_event trace_userunwind_stack_event = {
+	.type		= TRACE_USER_UNWIND_STACK,
+	.funcs		= &trace_userunwind_stack_funcs,
+};
+
+static struct trace_event_functions trace_userunwind_cookie_funcs = {
+	.trace		= trace_user_unwind_cookie_print,
+};
+
+static struct trace_event trace_userunwind_cookie_event = {
+	.type		= TRACE_USER_UNWIND_COOKIE,
+	.funcs		= &trace_userunwind_cookie_funcs,
+};
 
 static struct trace_event_functions trace_user_stack_funcs = {
 	.trace		= trace_user_stack_print,
@@ -1720,6 +1788,8 @@ static struct trace_event *events[] __initdata = {
 	&trace_ctx_event,
 	&trace_wake_event,
 	&trace_stack_event,
+	&trace_userunwind_cookie_event,
+	&trace_userunwind_stack_event,
 	&trace_user_stack_event,
 	&trace_bputs_event,
 	&trace_bprint_event,

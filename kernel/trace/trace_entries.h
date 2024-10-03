@@ -247,6 +247,34 @@ FTRACE_ENTRY(user_stack, userstack_entry,
 		 (void *)__entry->caller[6], (void *)__entry->caller[7])
 );
 
+FTRACE_ENTRY(user_unwind_stack, userunwind_stack_entry,
+
+	TRACE_USER_UNWIND_STACK,
+
+	F_STRUCT(
+		__field(		u64,		cookie	)
+		__dynamic_array(	unsigned long,	stack	)
+		__dynamic_array(	unsigned long,	inodes	)
+		__dynamic_array(	unsigned int,	dev	)
+	),
+
+	F_printk("cookie=%lld\n%s%s%s", __entry->cookie,
+		 __print_dynamic_array(stack, sizeof(unsigned long)),
+		 __print_dynamic_array(inodes, sizeof(unsigned long)),
+		 __print_dynamic_array(dev, sizeof(unsigned long)))
+);
+
+FTRACE_ENTRY(user_unwind_cookie, userunwind_cookie_entry,
+
+	TRACE_USER_UNWIND_COOKIE,
+
+	F_STRUCT(
+		__field(		u64,		cookie	)
+	),
+
+	F_printk("cookie=%lld", __entry->cookie)
+);
+
 /*
  * trace_printk entry:
  */
@@ -257,7 +285,7 @@ FTRACE_ENTRY(bprint, bprint_entry,
 	F_STRUCT(
 		__field(	unsigned long,	ip	)
 		__field(	const char *,	fmt	)
-		__dynamic_array(	u32,	buf	)
+		__dynamic_field(	u32,	buf	)
 	),
 
 	F_printk("%ps: %s",
@@ -270,7 +298,7 @@ FTRACE_ENTRY_REG(print, print_entry,
 
 	F_STRUCT(
 		__field(	unsigned long,	ip	)
-		__dynamic_array(	char,	buf	)
+		__dynamic_field(	char,	buf	)
 	),
 
 	F_printk("%ps: %s",
@@ -285,7 +313,7 @@ FTRACE_ENTRY(raw_data, raw_data_entry,
 
 	F_STRUCT(
 		__field(	unsigned int,	id	)
-		__dynamic_array(	char,	buf	)
+		__dynamic_field(	char,	buf	)
 	),
 
 	F_printk("id:%04x %08x",

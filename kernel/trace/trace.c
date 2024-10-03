@@ -3076,6 +3076,104 @@ EXPORT_SYMBOL_GPL(trace_dump_stack);
 #ifdef CONFIG_USER_STACKTRACE_SUPPORT
 static DEFINE_PER_CPU(int, user_stack_count);
 
+static void trace_user_unwind_callback(struct unwind_stacktrace *trace,
+				       u64 ctx_cookie, void *data)
+{
+	struct trace_event_call *call = &event_user_unwind_stack;
+	struct trace_array *tr = data;
+	struct trace_buffer *buffer = tr->array_buffer.buffer;
+	struct userunwind_stack_entry *entry;
+	struct ring_buffer_event *event;
+	struct mm_struct *mm = current->mm;
+	unsigned int trace_ctx;
+	struct vm_area_struct *vma = NULL;
+	unsigned long *caller;
+	unsigned long *inodes;
+	unsigned int *devs;
+	unsigned int offset;
+	int len;
+	int i;
+
+	len = trace->nr * (sizeof(unsigned long) * 2 + sizeof(unsigned int))
+			   + sizeof(*entry);
+
+	trace_ctx = tracing_gen_ctx();
+	event = __trace_buffer_lock_reserve(buffer, TRACE_USER_UNWIND_STACK,
+					    len, trace_ctx);
+	if (!event)
+		return;
+
+	entry	= ring_buffer_event_data(event);
+
+	entry->cookie = ctx_cookie;
+
+	offset = sizeof(*entry);
+	len = sizeof(unsigned long) * trace->nr;
+
+	entry->__data_loc_stack = offset | (len << 16);
+	caller = (void *)entry + offset;
+
+	offset += len;
+	entry->__data_loc_inodes = offset | (len << 16);
+	inodes = (void *)entry + offset;
+
+	offset += len;
+	len = sizeof(unsigned int) * trace->nr;
+	entry->__data_loc_dev = offset | (len << 16);
+	devs = (void *)entry + offset;
+
+	for (i = 0; i < trace->nr; i++) {
+		unsigned long addr = trace->entries[i];
+
+		if (!mm) {
+			caller[i] = addr;
+			inodes[i] = 0;
+			devs[i] = 0;
+			continue;
+		}
+		mmap_read_lock(mm);
+		if (!vma || addr < vma->vm_start || addr >= vma->vm_end)
+			vma = vma_lookup(mm, addr);
+
+		if (!vma) {
+			caller[i] = addr;
+			inodes[i] = 0;
+			devs[i] = 0;
+			mmap_read_unlock(mm);
+			continue;
+		}
+		caller[i] = (addr - vma->vm_start) + (vma->vm_pgoff << PAGE_SHIFT);
+		if (vma->vm_file && vma->vm_file->f_inode) {
+			inodes[i] = vma->vm_file->f_inode->i_ino;
+			devs[i] = vma->vm_file->f_inode->i_sb->s_dev;
+		}
+		mmap_read_unlock(mm);
+	}
+
+	if (!call_filter_check_discard(call, entry, buffer, event))
+		__buffer_unlock_commit(buffer, event);
+}
+
+static void
+ftrace_trace_userstack_delay(struct trace_array *tr,
+			     struct trace_buffer *buffer, unsigned int trace_ctx)
+{
+	struct trace_event_call *call = &event_user_unwind_cookie;
+	struct userunwind_cookie_entry *entry;
+	struct ring_buffer_event *event;
+
+	event = __trace_buffer_lock_reserve(buffer, TRACE_USER_UNWIND_COOKIE,
+					    sizeof(*entry), trace_ctx);
+	if (!event)
+		return;
+	entry	= ring_buffer_event_data(event);
+
+	unwind_user_deferred(&tr->unwinder, &entry->cookie, tr);
+
+	if (!call_filter_check_discard(call, entry, buffer, event))
+		__buffer_unlock_commit(buffer, event);
+}
+
 static void
 ftrace_trace_userstack(struct trace_array *tr,
 		       struct trace_buffer *buffer, unsigned int trace_ctx)
@@ -3092,6 +3190,11 @@ ftrace_trace_userstack(struct trace_array *tr,
 	 */
 	if (unlikely(in_nmi()))
 		return;
+
+	if (tr->trace_flags & TRACE_ITER_USERSTACKTRACE_DELAY) {
+		ftrace_trace_userstack_delay(tr, buffer, trace_ctx);
+		return;
+	}
 
 	/*
 	 * prevent recursion, since the user stack tracing may
@@ -9623,6 +9726,8 @@ trace_array_create_systems(const char *name, const char *systems,
 
 	list_add(&tr->list, &ftrace_trace_arrays);
 
+	unwind_user_register(&tr->unwinder, trace_user_unwind_callback);
+
 	tr->ref++;
 
 	return tr;
@@ -9741,6 +9846,8 @@ static int __remove_instance(struct trace_array *tr)
 	/* Reference counter for a newly created trace array = 1. */
 	if (tr->ref > 1 || (tr->current_trace && tr->trace_ref))
 		return -EBUSY;
+
+	unwind_user_unregister(&tr->unwinder);
 
 	list_del(&tr->list);
 
@@ -10778,6 +10885,8 @@ __init static int tracer_alloc_buffers(void)
 	register_snapshot_cmd();
 
 	test_can_verify();
+
+	unwind_user_register(&global_trace.unwinder, trace_user_unwind_callback);
 
 	return 0;
 

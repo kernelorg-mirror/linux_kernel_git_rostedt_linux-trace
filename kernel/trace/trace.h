@@ -8,6 +8,7 @@
 #include <linux/sched.h>
 #include <linux/clocksource.h>
 #include <linux/ring_buffer.h>
+#include <linux/unwind_user.h>
 #include <linux/mmiotrace.h>
 #include <linux/tracepoint.h>
 #include <linux/ftrace.h>
@@ -48,7 +49,10 @@ enum trace_type {
 	TRACE_GRAPH_ENT,
 	TRACE_GRAPH_RETADDR_ENT,
 	TRACE_USER_STACK,
+	/* trace-cmd manually adds blktrace after USER_STACK */
 	TRACE_BLK,
+	TRACE_USER_UNWIND_STACK,
+	TRACE_USER_UNWIND_COOKIE,
 	TRACE_BPUTS,
 	TRACE_HWLAT,
 	TRACE_OSNOISE,
@@ -92,7 +96,10 @@ enum trace_type {
 #define __array_desc(type, container, item, size)
 
 #undef __dynamic_array
-#define __dynamic_array(type, item)	type	item[];
+#define __dynamic_array(type, item)	u32	__data_loc_##item;
+
+#undef __dynamic_field
+#define __dynamic_field(type, item)	type	item[];
 
 #undef __rel_dynamic_array
 #define __rel_dynamic_array(type, item)	type	item[];
@@ -422,6 +429,7 @@ struct trace_array {
 	struct cond_snapshot	*cond_snapshot;
 #endif
 	struct trace_func_repeats	__percpu *last_func_repeats;
+	struct unwind_callback	unwinder;
 	/*
 	 * On boot up, the ring buffer is set to the minimum size, so that
 	 * we do not waste memory on systems that are not using tracing.
@@ -498,6 +506,9 @@ extern void __ftrace_bad_type(void);
 		IF_ASSIGN(var, ent, struct ftrace_entry, TRACE_FN);	\
 		IF_ASSIGN(var, ent, struct ctx_switch_entry, 0);	\
 		IF_ASSIGN(var, ent, struct stack_entry, TRACE_STACK);	\
+		IF_ASSIGN(var, ent, struct userstack_entry, TRACE_USER_STACK);\
+		IF_ASSIGN(var, ent, struct userunwind_stack_entry, TRACE_USER_UNWIND_STACK);\
+		IF_ASSIGN(var, ent, struct userunwind_cookie_entry, TRACE_USER_UNWIND_COOKIE);\
 		IF_ASSIGN(var, ent, struct userstack_entry, TRACE_USER_STACK);\
 		IF_ASSIGN(var, ent, struct print_entry, TRACE_PRINT);	\
 		IF_ASSIGN(var, ent, struct bprint_entry, TRACE_BPRINT);	\
@@ -1321,6 +1332,7 @@ extern int trace_get_user(struct trace_parser *parser, const char __user *ubuf,
 		C(PRINTK,		"trace_printk"),	\
 		C(ANNOTATE,		"annotate"),		\
 		C(USERSTACKTRACE,	"userstacktrace"),	\
+		C(USERSTACKTRACE_DELAY,	"userstacktrace_delay"),\
 		C(SYM_USEROBJ,		"sym-userobj"),		\
 		C(PRINTK_MSGONLY,	"printk-msg-only"),	\
 		C(CONTEXT_INFO,		"context-info"),   /* Print pid/cpu/time */ \
