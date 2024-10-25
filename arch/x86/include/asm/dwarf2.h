@@ -6,6 +6,15 @@
 #warning "asm/dwarf2.h should be only included in pure assembly files"
 #endif
 
+#ifdef BUILD_VDSO
+
+	/*
+	 * For the vDSO, emit both runtime unwind information and debug
+	 * symbols for the .dbg file.
+	 */
+
+	.cfi_sections .eh_frame, .debug_frame
+
 #define CFI_STARTPROC		.cfi_startproc
 #define CFI_ENDPROC		.cfi_endproc
 #define CFI_DEF_CFA		.cfi_def_cfa
@@ -21,7 +30,8 @@
 #define CFI_UNDEFINED		.cfi_undefined
 #define CFI_ESCAPE		.cfi_escape
 
-#ifndef BUILD_VDSO
+#else /* !BUILD_VDSO */
+
 	/*
 	 * Emit CFI data in .debug_frame sections, not .eh_frame sections.
 	 * The latter we currently just discard since we don't do DWARF
@@ -29,13 +39,24 @@
 	 * useful to anyone.  Note we should not use this directive if we
 	 * ever decide to enable DWARF unwinding at runtime.
 	 */
+
 	.cfi_sections .debug_frame
-#else
-	 /*
-	  * For the vDSO, emit both runtime unwind information and debug
-	  * symbols for the .dbg file.
-	  */
-	.cfi_sections .eh_frame, .debug_frame
-#endif
+
+#define CFI_STARTPROC
+#define CFI_ENDPROC
+#define CFI_DEF_CFA
+#define CFI_DEF_CFA_REGISTER
+#define CFI_DEF_CFA_OFFSET
+#define CFI_ADJUST_CFA_OFFSET
+#define CFI_OFFSET
+#define CFI_REL_OFFSET
+#define CFI_REGISTER
+#define CFI_RESTORE
+#define CFI_REMEMBER_STATE
+#define CFI_RESTORE_STATE
+#define CFI_UNDEFINED
+#define CFI_ESCAPE
+
+#endif /* !BUILD_VDSO */
 
 #endif /* _ASM_X86_DWARF2_H */
