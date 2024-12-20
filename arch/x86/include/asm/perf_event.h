@@ -639,4 +639,6 @@ static __always_inline void perf_lopwr_cb(bool lopwr_in)
 
 #define arch_perf_out_copy_user copy_from_user_nmi
 
+unsigned long segment_base_address(unsigned int segment);
+
 #endif /* _ASM_X86_PERF_EVENT_H */
