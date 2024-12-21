@@ -182,4 +182,6 @@ static inline int mmap_lock_is_contended(struct mm_struct *mm)
 	return rwsem_is_contended(&mm->mmap_lock);
 }
 
+DEFINE_GUARD(mmap_read_lock, struct mm_struct *, mmap_read_lock(_T), mmap_read_unlock(_T))
+
 #endif /* _LINUX_MMAP_LOCK_H */
