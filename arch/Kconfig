@@ -446,6 +446,9 @@ config HAVE_UNWIND_USER_COMPAT_FP
 	bool
 	depends on HAVE_UNWIND_USER_FP
 
+config HAVE_UNWIND_USER_SFRAME
+	bool
+
 config AS_SFRAME
 	def_bool $(as-instr,.cfi_sections .sframe\n.cfi_startproc\n.cfi_endproc)
 
