@@ -4,8 +4,20 @@
 
 #include <linux/sframe.h>
 
+/*
+ * NOTE: The below debugging interfaces aren't enabled by default with
+ * CONFIG_DYNAMIC_DEBUG because they introduce some uaccess objtool warnings
+ * due to the pr_debug() calls between user_read_access_begin() and
+ * user_read_access_end().  It's fine for testing but not for production.
+ *
+ * To enable the debug messages, define SFRAME_DEBUG here along with
+ * CONFIG_DYNAMIC_DEBUG.
+ *
+ * TODO defer printks until after uaccess region
+ */
+
 #ifdef CONFIG_DYNAMIC_DEBUG
-#define SFRAME_DEBUG
+//#define SFRAME_DEBUG
 #endif
 
 #ifdef SFRAME_DEBUG
