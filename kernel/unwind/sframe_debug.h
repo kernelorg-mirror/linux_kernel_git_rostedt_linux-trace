@@ -3,6 +3,7 @@
 #define _SFRAME_DBG_H
 
 #include <linux/sframe.h>
+#include "sframe.h"
 
 /*
  * NOTE: The below debugging interfaces aren't enabled by default with
@@ -27,6 +28,28 @@
 
 #define dbg_sec(fmt, ...)					\
 	dbg("%s: " fmt, sec->filename, ##__VA_ARGS__)
+
+static inline void dbg_print_section(struct sframe_section *sec)
+{
+	unsigned long fdes_end;
+
+	fdes_end = sec->fdes_start + (sec->num_fdes * sizeof(struct sframe_fde));
+
+	dbg_sec("SEC: sframe:0x%lx-0x%lx text:0x%lx-0x%lx "
+		"fdes:0x%lx-0x%lx fres:0x%lx-0x%lx "
+		"ra_off:%d fp_off:%d\n",
+		sec->sframe_start, sec->sframe_end, sec->text_start, sec->text_end,
+		sec->fdes_start, fdes_end, sec->fres_start, sec->fres_end,
+		sec->ra_off, sec->fp_off);
+}
+
+static inline void dbg_print_fde(struct sframe_section *sec, struct sframe_fde *fde)
+{
+	dbg_sec("FDE: start_addr:0x%x func_size:0x%x "
+		"fres_off:0x%x fres_num:%d info:%u rep_size:%u\n",
+		fde->start_addr, fde->func_size,
+		fde->fres_off, fde->fres_num, fde->info, fde->rep_size);
+}
 
 static inline void dbg_init_section(struct sframe_section *sec)
 {
@@ -55,6 +78,8 @@ static inline void dbg_free_section(struct sframe_section *sec)
 #define dbg(args...)		no_printk(args)
 #define dbg_sec(args...)	no_printk(args)
 
+static inline void dbg_print_section(struct sframe_section *sec) {}
+static inline void dbg_print_fde(struct sframe_section *sec, struct sframe_fde *fde) {}
 static inline void dbg_init_section(struct sframe_section *sec) {}
 static inline void dbg_free_section(struct sframe_section *sec) {}
 

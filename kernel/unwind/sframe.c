@@ -317,6 +317,80 @@ end:
 	return ret;
 }
 
+#ifdef SFRAME_DEBUG
+
+static __always_inline int __sframe_validate_section(struct sframe_section *sec)
+{
+	unsigned long prev_ip = 0;
+	unsigned int i;
+
+	for (i = 0; i < sec->num_fdes; i++) {
+		unsigned long ip, fre_addr;
+		struct sframe_fde fde;
+		unsigned int j;
+		int ret;
+
+		ret = read_fde(sec, i, &fde);
+		if (ret)
+			return ret;
+
+		ip = sec->sframe_start + fde.start_addr;
+		if (ip <= prev_ip) {
+			dbg_sec("fde %u not sorted\n", i);
+			return -EINVAL;
+		}
+		prev_ip = ip;
+
+		fre_addr = sec->fres_start + fde.fres_off;
+		for (j = 0; j < fde.fres_num; j++) {
+			u32 prev_fre_ip_off = 0;
+			bool prev_valid = false;
+			struct sframe_fre fre;
+			int ret;
+
+			ret = read_fre(sec, &fde, fre_addr, &fre);
+			if (ret) {
+				dbg_sec("the previous error applies to fde %u fre %u(0x%lx)\n",
+					i, j, fre_addr);
+				dbg_print_fde(sec, &fde);
+				return ret;
+			}
+			fre_addr += fre.size;
+
+			if (prev_valid && fre.ip_off <= prev_fre_ip_off) {
+				dbg_sec("fde %u: fre %u not sorted\n", i, j);
+				return -EINVAL;
+			}
+			prev_fre_ip_off = fre.ip_off;
+			prev_valid = true;
+		}
+	}
+
+	return 0;
+}
+
+static int sframe_validate_section(struct sframe_section *sec)
+{
+	int ret;
+
+	if (!user_read_access_begin((void __user *)sec->sframe_start,
+				    sec->sframe_end - sec->sframe_start)) {
+		dbg_sec("section usercopy failed\n");
+		return -EFAULT;
+	}
+
+	ret = __sframe_validate_section(sec);
+	user_read_access_end();
+	return ret;
+}
+
+#else /*  !SFRAME_DEBUG */
+
+static int sframe_validate_section(struct sframe_section *sec) { return 0; }
+
+#endif /* !SFRAME_DEBUG */
+
+
 static void free_section(struct sframe_section *sec)
 {
 	dbg_free_section(sec);
@@ -331,6 +405,7 @@ static int sframe_read_header(unsigned long sframe_start, unsigned long sframe_e
 	struct maple_tree *sframe_mt = &current->mm->sframe_mt;
 	struct sframe_header shdr;
 	unsigned int num_fdes;
+	int ret;
 
 	if (copy_from_user(&shdr, (void __user *)sframe_start, sizeof(shdr))) {
 		dbg_sec("header usercopy failed\n");
@@ -380,6 +455,12 @@ static int sframe_read_header(unsigned long sframe_start, unsigned long sframe_e
 
 	sec->ra_off		= shdr.cfa_fixed_ra_offset;
 	sec->fp_off		= shdr.cfa_fixed_fp_offset;
+
+	ret = sframe_validate_section(sec);
+	if (ret) {
+		dbg_print_section(sec);
+		return ret;
+	}
 
 	return mtree_insert_range(sframe_mt, text_start, text_end, sec, GFP_KERNEL);
 }
