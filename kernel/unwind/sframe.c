@@ -11,12 +11,13 @@
 #include <linux/sframe.h>
 #include <linux/unwind_user_types.h>
 
+#include "sframe_debug.h"
 #include "sframe.h"
 
-#define dbg pr_debug
 
 static void free_section(struct sframe_section *sec)
 {
+	dbg_free_section(sec);
 	kfree(sec);
 }
 
@@ -30,7 +31,7 @@ static int sframe_read_header(unsigned long sframe_start, unsigned long sframe_e
 	unsigned int num_fdes;
 
 	if (copy_from_user(&shdr, (void __user *)sframe_start, sizeof(shdr))) {
-		dbg("header usercopy failed\n");
+		dbg_sec("header usercopy failed\n");
 		return -EFAULT;
 	}
 
@@ -38,18 +39,18 @@ static int sframe_read_header(unsigned long sframe_start, unsigned long sframe_e
 	    shdr.preamble.version != SFRAME_VERSION_2 ||
 	    !(shdr.preamble.flags & SFRAME_F_FDE_SORTED) ||
 	    shdr.auxhdr_len) {
-		dbg("bad/unsupported sframe header\n");
+		dbg_sec("bad/unsupported sframe header\n");
 		return -EINVAL;
 	}
 
 	if (!shdr.num_fdes || !shdr.num_fres) {
-		dbg("no fde/fre entries\n");
+		dbg_sec("no fde/fre entries\n");
 		return -EINVAL;
 	}
 
 	header_end = sframe_start + SFRAME_HDR_SIZE(shdr);
 	if (header_end >= sframe_end) {
-		dbg("header doesn't fit in section\n");
+		dbg_sec("header doesn't fit in section\n");
 		return -EINVAL;
 	}
 
@@ -61,7 +62,7 @@ static int sframe_read_header(unsigned long sframe_start, unsigned long sframe_e
 	fres_end   = fres_start + shdr.fre_len;
 
 	if (fres_start < fdes_end || fres_end > sframe_end) {
-		dbg("inconsistent fde/fre offsets\n");
+		dbg_sec("inconsistent fde/fre offsets\n");
 		return -EINVAL;
 	}
 
@@ -115,6 +116,8 @@ int sframe_add_section(unsigned long sframe_start, unsigned long sframe_end,
 	sec = kzalloc(sizeof(*sec), GFP_KERNEL);
 	if (!sec)
 		return -ENOMEM;
+
+	dbg_init_section(sec);
 
 	ret = sframe_read_header(sframe_start, sframe_end, text_start, text_end, sec);
 	if (ret)
