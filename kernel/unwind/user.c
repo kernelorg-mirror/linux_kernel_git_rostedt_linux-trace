@@ -7,6 +7,7 @@
 #include <linux/kernel.h>
 #include <linux/sched.h>
 #include <linux/unwind_user.h>
+#include <linux/sframe.h>
 #include <linux/uaccess.h>
 #include <asm/unwind_user.h>
 
@@ -30,6 +31,12 @@ static inline bool compat_state(struct unwind_user_state *state)
 	       state->type == UNWIND_USER_TYPE_COMPAT_FP;
 }
 
+static inline bool sframe_state(struct unwind_user_state *state)
+{
+	return IS_ENABLED(CONFIG_HAVE_UNWIND_USER_SFRAME) &&
+	       state->type == UNWIND_USER_TYPE_SFRAME;
+}
+
 #define UNWIND_GET_USER_LONG(to, from, state)				\
 ({									\
 	int __ret;							\
@@ -49,12 +56,19 @@ int unwind_user_next(struct unwind_user_state *state)
 	if (state->done)
 		return -EINVAL;
 
-	if (compat_state(state))
+	if (compat_state(state)) {
 		frame = &compat_fp_frame;
-	else if (fp_state(state))
+	} else if (sframe_state(state)) {
+		if (sframe_find(state->ip, frame)) {
+			if (!IS_ENABLED(CONFIG_HAVE_UNWIND_USER_FP))
+				goto the_end;
+			frame = &fp_frame;
+		}
+	} else if (fp_state(state)) {
 		frame = &fp_frame;
-	else
+	} else {
 		goto the_end;
+	}
 
 	cfa = (frame->use_fp ? state->fp : state->sp) + frame->cfa_off;
 	if (cfa <= state->sp)
@@ -93,6 +107,8 @@ int unwind_user_start(struct unwind_user_state *state)
 
 	if (IS_ENABLED(CONFIG_HAVE_UNWIND_USER_COMPAT_FP) && in_compat_mode(regs))
 		state->type = UNWIND_USER_TYPE_COMPAT_FP;
+	else if (current_has_sframe())
+		state->type = UNWIND_USER_TYPE_SFRAME;
 	else if (IS_ENABLED(CONFIG_HAVE_UNWIND_USER_FP))
 		state->type = UNWIND_USER_TYPE_FP;
 	else
