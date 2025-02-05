@@ -95,6 +95,7 @@ struct trace_buffer *__ring_buffer_alloc_range(unsigned long size, unsigned flag
 					       struct lock_class_key *key);
 
 bool ring_buffer_last_boot_delta(struct trace_buffer *buffer, unsigned long *kaslr_addr);
+void *ring_buffer_meta_scratch(struct trace_buffer *buffer, unsigned int *size);
 
 /*
  * Because the ring buffer is generic, if other users of the ring buffer get

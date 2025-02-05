@@ -1730,6 +1730,9 @@ static bool rb_meta_init(struct trace_buffer *buffer)
 	bmeta->total_size = total_size;
 	bmeta->buffers_offset = (void *)ptr - (void *)bmeta;
 
+	/* Zero out the scatch pad */
+	memset((void *)bmeta + sizeof(*bmeta), 0, PAGE_SIZE - sizeof(*bmeta));
+
 	return false;
 }
 
@@ -2530,6 +2533,16 @@ bool ring_buffer_last_boot_delta(struct trace_buffer *buffer, unsigned long *kas
 	*kaslr_addr = buffer->kaslr_addr;
 
 	return true;
+}
+
+void *ring_buffer_meta_scratch(struct trace_buffer *buffer, unsigned int *size)
+{
+	if (!buffer || !buffer->meta)
+		return NULL;
+
+	*size = PAGE_SIZE - sizeof(*buffer->meta);
+
+	return (void *)buffer->meta + sizeof(*buffer->meta);
 }
 
 /**
