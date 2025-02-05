@@ -6001,6 +6001,7 @@ struct trace_mod_entry {
 
 struct trace_scratch {
 	unsigned long		kaslr_addr;
+	unsigned long		first_free_slot;
 	unsigned long		nr_entries;
 	struct trace_mod_entry	entries[];
 };
@@ -6012,6 +6013,7 @@ static int save_mod(struct module *mod, void *data)
 	struct trace_array *tr = data;
 	struct trace_scratch *tscratch;
 	struct trace_mod_entry *entry;
+	unsigned int idx;
 	unsigned int size;
 
 	guard(mutex)(&scratch_mutex);
@@ -6021,15 +6023,59 @@ static int save_mod(struct module *mod, void *data)
 		return -1;
 	size = tr->scratch_size;
 
-	if (struct_size(tscratch, entries, tscratch->nr_entries + 1) > size)
+	idx = tscratch->first_free_slot < tscratch->nr_entries ?
+		tscratch->first_free_slot : tscratch->nr_entries;
+
+	if (struct_size(tscratch, entries, idx + 1) > size)
 		return -1;
 
-	entry = &tscratch->entries[tscratch->nr_entries];
-
-	tscratch->nr_entries++;
+	entry = &tscratch->entries[idx];
 
 	entry->mod_addr = (unsigned long)mod->mem[MOD_TEXT].base;
 	strscpy(entry->mod_name, mod->name);
+
+	if (idx == tscratch->nr_entries)
+		tscratch->nr_entries++;
+
+	for (idx++; idx < tscratch->nr_entries; idx++) {
+		entry = &tscratch->entries[idx];
+		if (!entry->mod_addr)
+			break;
+	}
+
+	tscratch->first_free_slot = idx;
+
+	return 0;
+}
+
+static int remove_mod(struct module *mod, void *data)
+{
+	struct trace_array *tr = data;
+	struct trace_scratch *tscratch;
+	struct trace_mod_entry *entry;
+	unsigned int idx;
+	unsigned int size;
+
+	guard(mutex)(&scratch_mutex);
+
+	tscratch = tr->scratch;
+	if (!tscratch)
+		return -1;
+	size = tr->scratch_size;
+
+	for (idx = 0; idx < tscratch->nr_entries; idx++) {
+		entry = &tscratch->entries[idx];
+		if (entry->mod_addr == (unsigned long)mod->mem[MOD_TEXT].base)
+			break;
+	}
+	if (idx == tscratch->nr_entries)
+		return -1;
+
+	if (idx < tscratch->first_free_slot)
+		tscratch->first_free_slot = idx;
+
+	entry->mod_addr = 0;
+	entry->mod_name[0] = '\0';
 
 	return 0;
 }
@@ -10112,6 +10158,20 @@ static void trace_module_record(struct module *mod)
 	}
 }
 
+static void trace_module_delete(struct module *mod)
+{
+	struct trace_array *tr;
+
+	list_for_each_entry(tr, &ftrace_trace_arrays, list) {
+		/* Update any persistent trace array that has already been started */
+		if ((tr->flags & (TRACE_ARRAY_FL_BOOT | TRACE_ARRAY_FL_LAST_BOOT)) ==
+		    TRACE_ARRAY_FL_BOOT) {
+			if (trace_array_active(tr))
+				remove_mod(mod, tr);
+		}
+	}
+}
+
 static int trace_module_notify(struct notifier_block *self,
 			       unsigned long val, void *data)
 {
@@ -10124,6 +10184,7 @@ static int trace_module_notify(struct notifier_block *self,
 		break;
 	case MODULE_STATE_GOING:
 		trace_module_remove_evals(mod);
+		trace_module_delete(mod);
 		break;
 	}
 
