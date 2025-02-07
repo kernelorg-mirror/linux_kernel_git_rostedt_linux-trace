@@ -501,6 +501,8 @@ static int pmem_attach_disk(struct device *dev,
 	if (is_nd_pfn(dev) || pmem_should_map_pages(dev))
 		lim.features |= BLK_FEAT_DAX;
 
+	printk("PMEM RES %s START %lx - %lx\n", res->name, (long)res->start,
+	       (long)res->end);
 	if (!devm_request_mem_region(dev, res->start, resource_size(res),
 				dev_name(&ndns->dev))) {
 		dev_warn(dev, "could not reserve region %pR\n", res);
@@ -606,15 +608,19 @@ static int nd_pmem_probe(struct device *dev)
 	if (IS_ERR(ndns))
 		return PTR_ERR(ndns);
 
+	printk("%s:%d\n", __func__, __LINE__);
 	if (is_nd_btt(dev))
 		return nvdimm_namespace_attach_btt(ndns);
 
+	printk("%s:%d\n", __func__, __LINE__);
 	if (is_nd_pfn(dev))
 		return pmem_attach_disk(dev, ndns);
 
+	printk("%s:%d\n", __func__, __LINE__);
 	ret = devm_namespace_enable(dev, ndns, nd_info_block_reserve());
 	if (ret)
 		return ret;
+	printk("%s:%d\n", __func__, __LINE__);
 
 	ret = nd_btt_probe(dev, ndns);
 	if (ret == 0)

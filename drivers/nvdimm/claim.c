@@ -298,11 +298,15 @@ int devm_nsio_enable(struct device *dev, struct nd_namespace_io *nsio,
 		resource_size_t size)
 {
 	struct nd_namespace_common *ndns = &nsio->common;
+	struct resource *res = &nsio->res;
 	struct range range = {
 		.start = nsio->res.start,
 		.end = nsio->res.end,
 	};
 
+	printk("CLAIM RES %s START %lx - %lx\n", res->name, (long)res->start,
+	       (long)res->end);
+	dump_stack();
 	nsio->size = size;
 	if (!devm_request_mem_region(dev, range.start, size,
 				dev_name(&ndns->dev))) {

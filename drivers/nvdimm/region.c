@@ -43,6 +43,9 @@ static int nd_region_probe(struct device *dev)
 		dev_warn(dev, "'badblocks' notification disabled\n");
 	nvdimm_badblocks_populate(nd_region, &nd_region->bb, &range);
 
+	trace_printk("DEV=%s\n", dev->init_name);
+	if (dev->type)
+		trace_printk("  TYPE=%s\n", dev->type->name);
 	rc = nd_region_register_namespaces(nd_region, &err);
 	if (rc < 0)
 		return rc;

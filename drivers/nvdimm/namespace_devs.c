@@ -1498,6 +1498,10 @@ struct nd_namespace_common *nvdimm_namespace_common_probe(struct device *dev)
 		struct nd_namespace_io *nsio = to_nd_namespace_io(&ndns->dev);
 		struct resource *res = &nsio->res;
 
+		printk("res=%px name=%s START=%lx END=%lx OR=%lx align=%lx\n",
+		       res, res->name,
+		       (long)res->start, (long)res->end + 1,
+		       (long)(res->start | (res->end + 1)), (long)memremap_compat_align());
 		if (!IS_ALIGNED(res->start | (res->end + 1),
 					memremap_compat_align())) {
 			dev_err(&ndns->dev, "%pr misaligned, unable to map\n", res);
@@ -1551,6 +1555,8 @@ static struct device **create_namespace_io(struct nd_region *nd_region)
 	dev->parent = &nd_region->dev;
 	res = &nsio->res;
 	res->name = dev_name(&nd_region->dev);
+	trace_printk("%s: ASSIGN NAME %s start=%lx\n", __func__, res->name, (long)nd_region->ndr_start);
+	trace_dump_stack(0);
 	res->flags = IORESOURCE_MEM;
 	res->start = nd_region->ndr_start;
 	res->end = res->start + nd_region->ndr_size - 1;

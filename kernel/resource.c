@@ -1108,12 +1108,16 @@ __reserve_region_with_split(struct resource *root, resource_size_t start,
 
 		conflict = __request_resource(parent, res);
 		if (!conflict) {
+			printk("SPLIT NO CONFLICT\n");
 			if (!next_res)
 				break;
 			res = next_res;
 			next_res = NULL;
 			continue;
 		}
+
+		printk("CONFLICT %s %lx-%lx\n", conflict->name,
+		       (long)conflict->start, (long)conflict->end);
 
 		/* conflict covered whole area */
 		if (conflict->start <= res->start &&
@@ -1138,6 +1142,9 @@ __reserve_region_with_split(struct resource *root, resource_size_t start,
 				next_res->end = end;
 				next_res->flags = type | IORESOURCE_BUSY;
 				next_res->desc = IORES_DESC_NONE;
+				printk("ALLOC NEW RES %s: %lx - %lx\n",
+				       next_res->name, (long)next_res->start,
+				       (long)next_res->end);
 			}
 		} else {
 			res->start = conflict->end + 1;
@@ -1275,6 +1282,8 @@ static int __request_region_locked(struct resource *res, struct resource *parent
 		conflict = __request_resource(parent, res);
 		if (!conflict)
 			break;
+		printk("CONFLICT %s %lx-%lx\n", conflict->name,
+		       (long)conflict->start, (long)conflict->end);
 		/*
 		 * mm/hmm.c reserves physical addresses which then
 		 * become unavailable to other users.  Conflicts are
@@ -1285,6 +1294,8 @@ static int __request_region_locked(struct resource *res, struct resource *parent
 				conflict->name, conflict, res);
 		}
 		if (conflict != parent) {
+			printk("PARENT %s\n", conflict->flags & IORESOURCE_BUSY ?
+				"BUSY" : "NOT BUSY");
 			if (!(conflict->flags & IORESOURCE_BUSY)) {
 				parent = conflict;
 				continue;

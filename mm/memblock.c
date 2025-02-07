@@ -2296,6 +2296,63 @@ static void __init reserved_mem_add(phys_addr_t start, phys_addr_t size,
 	strscpy(map->name, name);
 }
 
+#include <linux/platform_device.h>
+
+static __init void reserve_mem_resource(unsigned long start, unsigned long size)
+{
+	struct resource *res;
+	int ret;
+
+	res = kzalloc(sizeof(*res), GFP_KERNEL);
+	if (!res)
+		return;
+
+	res->start = start;
+	res->end   = start + size - 1;
+	res->flags = IORESOURCE_SYSTEM_RAM;
+	res->name  = "Reserved RAM";
+
+	printk("INSERT RESOURCE\n");
+	ret = insert_resource(&iomem_resource, res);
+	if (res->parent)
+		res->parent->flags &= ~IORESOURCE_BUSY;
+	for (res = res->parent; res; res = res->parent)
+		printk("MEM PARENT: %s %lx - %lx (%s)\n", res->name,
+		       (long)res->start, (long)res->end,
+			res->flags & IORESOURCE_BUSY ? "BUSY" : "NOT BUSY");
+	if (ret) {
+		kfree(res);
+		printk("FAILED TO ADD RESOURCE\n");
+	}
+}
+
+static __init int register_reserve_pmem(void)
+{
+	struct platform_device *pdev;
+	struct reserve_mem_table *map;
+	int rc;
+
+	if (!reserved_mem_count)
+		return -1;
+
+	for (int i = 0; i < reserved_mem_count; i++) {
+		map = &reserved_mem_table[i];
+		if (!map->size)
+			continue;
+		reserve_mem_resource(map->start, map->size);
+	}
+
+	pdev = platform_device_alloc("reserve_pmem", -1);
+
+	rc = platform_device_add(pdev);
+	if (rc)
+		platform_device_put(pdev);
+
+	printk("Add reserve_pmem device? %d\n", rc);
+	return rc;
+}
+device_initcall(register_reserve_pmem);
+
 /**
  * reserve_mem_find_by_name - Find reserved memory region with a given name
  * @name: The name that is attached to a reserved memory region

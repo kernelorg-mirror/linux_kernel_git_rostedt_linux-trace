@@ -1082,6 +1082,8 @@ static struct nd_region *nd_region_create(struct nvdimm_bus *nvdimm_bus,
 	dev->of_node = ndr_desc->of_node;
 	nd_region->ndr_size = resource_size(ndr_desc->res);
 	nd_region->ndr_start = ndr_desc->res->start;
+	trace_printk("NDR_START=%lx\n", (long)nd_region->ndr_start);
+	trace_dump_stack(0);
 	nd_region->align = default_align(nd_region);
 	if (ndr_desc->flush)
 		nd_region->flush = ndr_desc->flush;
