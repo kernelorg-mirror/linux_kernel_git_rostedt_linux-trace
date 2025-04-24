@@ -3087,6 +3087,10 @@ ftrace_trace_userstack(struct trace_array *tr,
 	if (!(tr->trace_flags & TRACE_ITER_USERSTACKTRACE))
 		return;
 
+	/* No point doing user space stacktraces on kernel threads */
+	if (current->flags & PF_KTHREAD)
+		return;
+
 	/*
 	 * NMIs can not handle page faults, even with fix ups.
 	 * The save user stack can (and often does) fault.
