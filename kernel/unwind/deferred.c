@@ -47,23 +47,47 @@ static u64 ctx_to_cookie(u64 cpu, u64 ctx)
 
 /*
  * Read the task context cookie, first initializing it if this is the first
- * call to get_cookie() since the most recent entry from user.
+ * call to get_cookie() since the most recent entry from user.  This has to be
+ * done carefully to coordinate with unwind_deferred_request_nmi().
  */
 static u64 get_cookie(struct unwind_task_info *info)
 {
 	u64 ctx_ctr;
 	u64 cookie;
-	u64 cpu;
 
 	guard(irqsave)();
 
-	cookie = info->cookie;
+	cookie = READ_ONCE(info->cookie);
 	if (cookie)
 		return cookie;
 
-	cpu = raw_smp_processor_id();
-	ctx_ctr = __this_cpu_inc_return(unwind_ctx_ctr);
-	info->cookie = ctx_to_cookie(cpu, ctx_ctr);
+	ctx_ctr = __this_cpu_read(unwind_ctx_ctr);
+
+	/* Read ctx_ctr before info->nmi_cookie */
+	barrier();
+
+	cookie = READ_ONCE(info->nmi_cookie);
+	if (cookie) {
+		/*
+		 * This is the first call to get_cookie() since an NMI handler
+		 * first wrote it to info->nmi_cookie.  Sync it.
+		 */
+		WRITE_ONCE(info->cookie, cookie);
+		WRITE_ONCE(info->nmi_cookie, 0);
+		return cookie;
+	}
+
+	/*
+	 * Write info->cookie.  It's ok to race with an NMI here.  The value of
+	 * the cookie is based on ctx_ctr from before the NMI could have
+	 * incremented it.  The result will be the same even if cookie or
+	 * ctx_ctr end up getting written twice.
+	 */
+	cookie = ctx_to_cookie(raw_smp_processor_id(), ctx_ctr + 1);
+	WRITE_ONCE(info->cookie, cookie);
+	WRITE_ONCE(info->nmi_cookie, 0);
+	barrier();
+	__this_cpu_write(unwind_ctx_ctr, ctx_ctr + 1);
 
 	return info->cookie;
 }
@@ -140,6 +164,51 @@ static void unwind_deferred_task_work(struct callback_head *head)
 		WRITE_ONCE(info->cookie, 0);
 }
 
+static int unwind_deferred_request_nmi(struct unwind_work *work, u64 *cookie)
+{
+	struct unwind_task_info *info = &current->unwind_info;
+	bool inited_cookie = false;
+	int ret;
+
+	*cookie = info->cookie;
+	if (!*cookie) {
+		/*
+		 * This is the first unwind request since the most recent entry
+		 * from user.  Initialize the task cookie.
+		 *
+		 * Don't write to info->cookie directly, otherwise it may get
+		 * cleared if the NMI occurred in the kernel during early entry
+		 * or late exit before the task work gets to run.  Instead, use
+		 * info->nmi_cookie which gets synced later by get_cookie().
+		 */
+		if (!info->nmi_cookie) {
+			u64 cpu = raw_smp_processor_id();
+			u64 ctx_ctr;
+
+			ctx_ctr = __this_cpu_inc_return(unwind_ctx_ctr);
+			info->nmi_cookie = ctx_to_cookie(cpu, ctx_ctr);
+
+			inited_cookie = true;
+		}
+
+		*cookie = info->nmi_cookie;
+	}
+
+	if (info->pending)
+		return 0;
+
+	ret = task_work_add(current, &info->work, TWA_NMI_CURRENT);
+	if (ret) {
+		if (inited_cookie)
+			info->nmi_cookie = 0;
+		return ret;
+	}
+
+	info->pending = 1;
+
+	return 0;
+}
+
 /*
  * Schedule a user space unwind to be done in task work before exiting the
  * kernel.
@@ -160,30 +229,37 @@ static void unwind_deferred_task_work(struct callback_head *head)
 int unwind_deferred_request(struct unwind_work *work, u64 *cookie)
 {
 	struct unwind_task_info *info = &current->unwind_info;
+	int pending;
 	int ret;
 
 	*cookie = 0;
 
-	if (WARN_ON_ONCE(in_nmi()))
-		return -EINVAL;
-
 	if ((current->flags & PF_KTHREAD) || !user_mode(task_pt_regs(current)))
 		return -EINVAL;
+
+	if (in_nmi())
+		return unwind_deferred_request_nmi(work, cookie);
 
 	guard(irqsave)();
 
 	*cookie = get_cookie(info);
 
 	/* callback already pending? */
-	if (info->pending)
+	pending = READ_ONCE(info->pending);
+	if (pending)
+		return 0;
+
+	/* Claim the work unless an NMI just now swooped in to do so. */
+	if (!try_cmpxchg(&info->pending, &pending, 1))
 		return 0;
 
 	/* The work has been claimed, now schedule it. */
 	ret = task_work_add(current, &info->work, TWA_RESUME);
-	if (WARN_ON_ONCE(ret))
+	if (WARN_ON_ONCE(ret)) {
+		WRITE_ONCE(info->pending, 0);
 		return ret;
+	}
 
-	info->pending = 1;
 	return 0;
 }
 

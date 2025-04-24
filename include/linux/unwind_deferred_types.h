@@ -10,6 +10,7 @@ struct unwind_cache {
 struct unwind_task_info {
 	struct unwind_cache	cache;
 	u64			cookie;
+	u64			nmi_cookie;
 	struct callback_head	work;
 	int			pending;
 };
