@@ -112,7 +112,6 @@ static __always_inline void enter_from_user_mode(struct pt_regs *regs)
 
 	CT_WARN_ON(__ct_state() != CT_STATE_USER);
 	user_exit_irqoff();
-	unwind_enter_from_user_mode();
 
 	instrumentation_begin();
 	kmsan_unpoison_entry_regs(regs);
@@ -363,6 +362,7 @@ static __always_inline void exit_to_user_mode(void)
 	lockdep_hardirqs_on_prepare();
 	instrumentation_end();
 
+	unwind_exit_to_user_mode();
 	user_enter_irqoff();
 	arch_exit_to_user_mode();
 	lockdep_hardirqs_on(CALLER_ADDR0);
