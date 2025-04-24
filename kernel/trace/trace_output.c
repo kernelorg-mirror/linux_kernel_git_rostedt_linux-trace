@@ -1380,9 +1380,13 @@ static enum print_line_t trace_user_unwind_stack_print(struct trace_iterator *it
 	struct userunwind_stack_entry *field;
 	struct trace_seq *s = &iter->seq;
 	unsigned long *caller;
+	unsigned long *inodes;
+	unsigned int *devs;
 	unsigned int offset;
 	unsigned int len;
 	unsigned int caller_cnt;
+	unsigned int inode_cnt;
+	unsigned int dev_cnt;
 	unsigned int i;
 
 	trace_assign_type(field, iter->ent);
@@ -1399,6 +1403,21 @@ static enum print_line_t trace_user_unwind_stack_print(struct trace_iterator *it
 
 	caller = (void *)iter->ent + offset;
 
+	/* The inodes and devices are also dynamic pointers */
+	offset = field->__data_loc_inodes;
+	len = offset >> 16;
+	offset = offset & 0xffff;
+	inode_cnt = len / sizeof(*inodes);
+
+	inodes = (void *)iter->ent + offset;
+
+	offset = field->__data_loc_dev;
+	len = offset >> 16;
+	offset = offset & 0xffff;
+	dev_cnt = len / sizeof(*devs);
+
+	devs = (void *)iter->ent + offset;
+
 	for (i = 0; i < caller_cnt; i++) {
 		unsigned long ip = caller[i];
 
@@ -1407,6 +1426,14 @@ static enum print_line_t trace_user_unwind_stack_print(struct trace_iterator *it
 
 		trace_seq_puts(s, " => ");
 		seq_print_user_ip(s, NULL, ip, flags);
+
+		if (i < inode_cnt) {
+			trace_seq_printf(s, " : %ld", inodes[i]);
+			if (i < dev_cnt) {
+				trace_seq_printf(s, " : %d:%d",
+						 MAJOR(devs[i]), MINOR(devs[i]));
+			}
+		}
 		trace_seq_putc(s, '\n');
 	}
 

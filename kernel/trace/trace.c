@@ -3089,6 +3089,8 @@ static void trace_user_unwind_callback(struct unwind_work *unwind,
 	unsigned int trace_ctx;
 	struct vm_area_struct *vma = NULL;
 	unsigned long *caller;
+	unsigned long *inodes;
+	unsigned int *devs;
 	unsigned int offset;
 	int len;
 	int i;
@@ -3100,7 +3102,8 @@ static void trace_user_unwind_callback(struct unwind_work *unwind,
 	if (!(tr->trace_flags & TRACE_ITER_USERSTACKTRACE_DELAY))
 		return;
 
-	len = trace->nr * sizeof(unsigned long) + sizeof(*entry);
+	len = trace->nr * (sizeof(unsigned long) * 2 + sizeof(unsigned int))
+			   + sizeof(*entry);
 
 	trace_ctx = tracing_gen_ctx();
 
@@ -3121,6 +3124,15 @@ static void trace_user_unwind_callback(struct unwind_work *unwind,
 	entry->__data_loc_stack = offset | (len << 16);
 	caller = (void *)entry + offset;
 
+	offset += len;
+	entry->__data_loc_inodes = offset | (len << 16);
+	inodes = (void *)entry + offset;
+
+	offset += len;
+	len = sizeof(unsigned int) * trace->nr;
+	entry->__data_loc_dev = offset | (len << 16);
+	devs = (void *)entry + offset;
+
 	for (i = 0; i < trace->nr; i++) {
 		unsigned long addr = trace->entries[i];
 
@@ -3129,9 +3141,20 @@ static void trace_user_unwind_callback(struct unwind_work *unwind,
 
 		if (!vma) {
 			caller[i] = addr;
+			inodes[i] = 0;
+			devs[i] = 0;
 			continue;
 		}
+
 		caller[i] = (addr - vma->vm_start) + (vma->vm_pgoff << PAGE_SHIFT);
+
+		if (vma->vm_file && vma->vm_file->f_inode) {
+			inodes[i] = vma->vm_file->f_inode->i_ino;
+			devs[i] = vma->vm_file->f_inode->i_sb->s_dev;
+		} else {
+			inodes[i] = 0;
+			devs[i] = 0;
+		}
 	}
 
 	__buffer_unlock_commit(buffer, event);

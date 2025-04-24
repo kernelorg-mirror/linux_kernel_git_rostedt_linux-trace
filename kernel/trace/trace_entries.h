@@ -256,10 +256,14 @@ FTRACE_ENTRY(user_unwind_stack, userunwind_stack_entry,
 	F_STRUCT(
 		__field(		u64,		cookie	)
 		__dynamic_array(	unsigned long,	stack	)
+		__dynamic_array(	unsigned long,	inodes	)
+		__dynamic_array(	unsigned int,	dev	)
 	),
 
-	F_printk("cookie=%lld\n%s", __entry->cookie,
-		 __print_dynamic_array(stack, sizeof(unsigned long)))
+	F_printk("cookie=%lld\n%s%s%s", __entry->cookie,
+		 __print_dynamic_array(stack, sizeof(unsigned long)),
+		 __print_dynamic_array(inodes, sizeof(unsigned long)),
+		 __print_dynamic_array(dev, sizeof(unsigned long)))
 );
 
 FTRACE_ENTRY(user_unwind_cookie, userunwind_cookie_entry,
