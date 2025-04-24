@@ -3085,11 +3085,17 @@ static void trace_user_unwind_callback(struct unwind_work *unwind,
 	struct trace_buffer *buffer = tr->array_buffer.buffer;
 	struct userunwind_stack_entry *entry;
 	struct ring_buffer_event *event;
+	struct mm_struct *mm = current->mm;
 	unsigned int trace_ctx;
+	struct vm_area_struct *vma = NULL;
 	unsigned long *caller;
 	unsigned int offset;
 	int len;
 	int i;
+
+	/* This should never happen */
+	if (!mm)
+		return;
 
 	if (!(tr->trace_flags & TRACE_ITER_USERSTACKTRACE_DELAY))
 		return;
@@ -3097,6 +3103,9 @@ static void trace_user_unwind_callback(struct unwind_work *unwind,
 	len = trace->nr * sizeof(unsigned long) + sizeof(*entry);
 
 	trace_ctx = tracing_gen_ctx();
+
+	guard(mmap_read_lock)(mm);
+
 	event = __trace_buffer_lock_reserve(buffer, TRACE_USER_UNWIND_STACK,
 					    len, trace_ctx);
 	if (!event)
@@ -3113,7 +3122,16 @@ static void trace_user_unwind_callback(struct unwind_work *unwind,
 	caller = (void *)entry + offset;
 
 	for (i = 0; i < trace->nr; i++) {
-		caller[i] = trace->entries[i];
+		unsigned long addr = trace->entries[i];
+
+		if (!vma || addr < vma->vm_start || addr >= vma->vm_end)
+			vma = vma_lookup(mm, addr);
+
+		if (!vma) {
+			caller[i] = addr;
+			continue;
+		}
+		caller[i] = (addr - vma->vm_start) + (vma->vm_pgoff << PAGE_SHIFT);
 	}
 
 	__buffer_unlock_commit(buffer, event);
