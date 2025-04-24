@@ -63,7 +63,7 @@ FTRACE_ENTRY_REG(function, ftrace_entry,
 	F_STRUCT(
 		__field_fn(	unsigned long,		ip		)
 		__field_fn(	unsigned long,		parent_ip	)
-		__dynamic_array( unsigned long,		args		)
+		__dynamic_field( unsigned long,		args		)
 	),
 
 	F_printk(" %ps <-- %ps",
@@ -81,7 +81,7 @@ FTRACE_ENTRY(funcgraph_entry, ftrace_graph_ent_entry,
 		__field_struct(	struct ftrace_graph_ent,	graph_ent	)
 		__field_packed(	unsigned long,	graph_ent,	func		)
 		__field_packed(	unsigned int,	graph_ent,	depth		)
-		__dynamic_array(unsigned long,	args				)
+		__dynamic_field(unsigned long,	args				)
 	),
 
 	F_printk("--> %ps (%u)", (void *)__entry->func, __entry->depth)
@@ -259,7 +259,7 @@ FTRACE_ENTRY(bprint, bprint_entry,
 	F_STRUCT(
 		__field(	unsigned long,	ip	)
 		__field(	const char *,	fmt	)
-		__dynamic_array(	u32,	buf	)
+		__dynamic_field(	u32,	buf	)
 	),
 
 	F_printk("%ps: %s",
@@ -272,7 +272,7 @@ FTRACE_ENTRY_REG(print, print_entry,
 
 	F_STRUCT(
 		__field(	unsigned long,	ip	)
-		__dynamic_array(	char,	buf	)
+		__dynamic_field(	char,	buf	)
 	),
 
 	F_printk("%ps: %s",
@@ -287,7 +287,7 @@ FTRACE_ENTRY(raw_data, raw_data_entry,
 
 	F_STRUCT(
 		__field(	unsigned int,	id	)
-		__dynamic_array(	char,	buf	)
+		__dynamic_field(	char,	buf	)
 	),
 
 	F_printk("id:%04x %08x",

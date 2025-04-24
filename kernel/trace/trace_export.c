@@ -57,8 +57,8 @@ static int ftrace_event_register(struct trace_event_call *call,
 #undef __array_desc
 #define __array_desc(type, container, item, size)	type item[size];
 
-#undef __dynamic_array
-#define __dynamic_array(type, item)			type item[];
+#undef __dynamic_field
+#define __dynamic_field(type, item)			type item[];
 
 #undef F_STRUCT
 #define F_STRUCT(args...)				args
@@ -123,8 +123,8 @@ static void __always_unused ____ftrace_check_##name(void)		\
 #undef __array_desc
 #define __array_desc(_type, _container, _item, _len) __array(_type, _item, _len)
 
-#undef __dynamic_array
-#define __dynamic_array(_type, _item) {					\
+#undef __dynamic_field
+#define __dynamic_field(_type, _item) {					\
 	.type = #_type "[]", .name = #_item,				\
 	.size = 0, .align = __alignof__(_type),				\
 	is_signed_type(_type), .filter_type = FILTER_OTHER },
@@ -161,8 +161,8 @@ static struct trace_event_fields ftrace_event_fields_##name[] = {	\
 #undef __array_desc
 #define __array_desc(type, container, item, len)
 
-#undef __dynamic_array
-#define __dynamic_array(type, item)
+#undef __dynamic_field
+#define __dynamic_field(type, item)
 
 #undef F_printk
 #define F_printk(fmt, args...) __stringify(fmt) ", "  __stringify(args)

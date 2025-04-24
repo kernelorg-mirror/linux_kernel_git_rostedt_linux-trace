@@ -92,8 +92,8 @@ enum trace_type {
 #undef __array_desc
 #define __array_desc(type, container, item, size)
 
-#undef __dynamic_array
-#define __dynamic_array(type, item)	type	item[];
+#undef __dynamic_field
+#define __dynamic_field(type, item)	type	item[];
 
 #undef __rel_dynamic_array
 #define __rel_dynamic_array(type, item)	type	item[];
