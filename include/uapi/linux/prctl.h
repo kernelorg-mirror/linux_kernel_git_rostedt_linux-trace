@@ -351,7 +351,7 @@ struct prctl_mm_map {
  * configuration.  All bits may be locked via this call, including
  * undefined bits.
  */
-#define PR_LOCK_SHADOW_STACK_STATUS      76
+#define PR_LOCK_SHADOW_STACK_STATUS	76
 
 /*
  * Controls the mode of timer_create() for CRIU restore operations.
@@ -363,5 +363,8 @@ struct prctl_mm_map {
 # define PR_TIMER_CREATE_RESTORE_IDS_OFF	0
 # define PR_TIMER_CREATE_RESTORE_IDS_ON		1
 # define PR_TIMER_CREATE_RESTORE_IDS_GET	2
+
+#define PR_ADD_SFRAME			78
+#define PR_REMOVE_SFRAME		79
 
 #endif /* _LINUX_PRCTL_H */
