@@ -249,6 +249,30 @@ FTRACE_ENTRY(user_stack, userstack_entry,
 		 (void *)__entry->caller[6], (void *)__entry->caller[7])
 );
 
+FTRACE_ENTRY(user_unwind_stack, userunwind_stack_entry,
+
+	TRACE_USER_UNWIND_STACK,
+
+	F_STRUCT(
+		__field(		u64,		cookie	)
+		__dynamic_array(	unsigned long,	stack	)
+	),
+
+	F_printk("cookie=%lld\n%s", __entry->cookie,
+		 __print_dynamic_array(stack, sizeof(unsigned long)))
+);
+
+FTRACE_ENTRY(user_unwind_cookie, userunwind_cookie_entry,
+
+	TRACE_USER_UNWIND_COOKIE,
+
+	F_STRUCT(
+		__field(		u64,		cookie	)
+	),
+
+	F_printk("cookie=%lld", __entry->cookie)
+);
+
 /*
  * trace_printk entry:
  */

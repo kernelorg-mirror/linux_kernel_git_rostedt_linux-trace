@@ -57,6 +57,9 @@ static int ftrace_event_register(struct trace_event_call *call,
 #undef __array_desc
 #define __array_desc(type, container, item, size)	type item[size];
 
+#undef __dynamic_array
+#define __dynamic_array(type, item)			u32 __data_loc_##item;
+
 #undef __dynamic_field
 #define __dynamic_field(type, item)			type item[];
 
@@ -66,6 +69,16 @@ static int ftrace_event_register(struct trace_event_call *call,
 #undef F_printk
 #define F_printk(fmt, args...) fmt, args
 
+/* Only used for ftrace event format output */
+static inline char * __print_dynamic_array(int array, size_t size)
+{
+	return NULL;
+}
+
+#undef __print_dynamic_array
+#define __print_dynamic_array(array, el_size)				\
+	__print_dynamic_array(__entry->__data_loc_##array, el_size)
+
 #undef FTRACE_ENTRY
 #define FTRACE_ENTRY(name, struct_name, id, tstruct, print)		\
 struct ____ftrace_##name {						\
@@ -74,6 +87,7 @@ struct ____ftrace_##name {						\
 static void __always_unused ____ftrace_check_##name(void)		\
 {									\
 	struct ____ftrace_##name *__entry = NULL;			\
+	struct trace_seq __maybe_unused *p = NULL;			\
 									\
 	/* force compile-time check on F_printk() */			\
 	printk(print);							\
@@ -123,6 +137,12 @@ static void __always_unused ____ftrace_check_##name(void)		\
 #undef __array_desc
 #define __array_desc(_type, _container, _item, _len) __array(_type, _item, _len)
 
+#undef __dynamic_array
+#define __dynamic_array(_type, _item) {					\
+	.type = "__data_loc " #_type "[]", .name = #_item,		\
+	.size = 4, .align = __alignof__(4),				\
+	is_signed_type(_type), .filter_type = FILTER_OTHER },
+
 #undef __dynamic_field
 #define __dynamic_field(_type, _item) {					\
 	.type = #_type "[]", .name = #_item,				\
@@ -160,6 +180,9 @@ static struct trace_event_fields ftrace_event_fields_##name[] = {	\
 
 #undef __array_desc
 #define __array_desc(type, container, item, len)
+
+#undef __dynamic_array
+#define __dynamic_array(type, item)
 
 #undef __dynamic_field
 #define __dynamic_field(type, item)

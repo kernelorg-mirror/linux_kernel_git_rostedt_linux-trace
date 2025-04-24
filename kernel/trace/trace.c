@@ -3077,6 +3077,66 @@ EXPORT_SYMBOL_GPL(trace_dump_stack);
 #ifdef CONFIG_USER_STACKTRACE_SUPPORT
 static DEFINE_PER_CPU(int, user_stack_count);
 
+static void trace_user_unwind_callback(struct unwind_work *unwind,
+				       struct unwind_stacktrace *trace,
+				       u64 ctx_cookie)
+{
+	struct trace_array *tr = container_of(unwind, struct trace_array, unwinder);
+	struct trace_buffer *buffer = tr->array_buffer.buffer;
+	struct userunwind_stack_entry *entry;
+	struct ring_buffer_event *event;
+	unsigned int trace_ctx;
+	unsigned long *caller;
+	unsigned int offset;
+	int len;
+	int i;
+
+	if (!(tr->trace_flags & TRACE_ITER_USERSTACKTRACE_DELAY))
+		return;
+
+	len = trace->nr * sizeof(unsigned long) + sizeof(*entry);
+
+	trace_ctx = tracing_gen_ctx();
+	event = __trace_buffer_lock_reserve(buffer, TRACE_USER_UNWIND_STACK,
+					    len, trace_ctx);
+	if (!event)
+		return;
+
+	entry	= ring_buffer_event_data(event);
+
+	entry->cookie = ctx_cookie;
+
+	offset = sizeof(*entry);
+	len = sizeof(unsigned long) * trace->nr;
+
+	entry->__data_loc_stack = offset | (len << 16);
+	caller = (void *)entry + offset;
+
+	for (i = 0; i < trace->nr; i++) {
+		caller[i] = trace->entries[i];
+	}
+
+	__buffer_unlock_commit(buffer, event);
+}
+
+static void
+ftrace_trace_userstack_delay(struct trace_array *tr,
+			     struct trace_buffer *buffer, unsigned int trace_ctx)
+{
+	struct userunwind_cookie_entry *entry;
+	struct ring_buffer_event *event;
+
+	event = __trace_buffer_lock_reserve(buffer, TRACE_USER_UNWIND_COOKIE,
+					    sizeof(*entry), trace_ctx);
+	if (!event)
+		return;
+	entry	= ring_buffer_event_data(event);
+
+	unwind_deferred_request(&tr->unwinder, &entry->cookie);
+
+	__buffer_unlock_commit(buffer, event);
+}
+
 static void
 ftrace_trace_userstack(struct trace_array *tr,
 		       struct trace_buffer *buffer, unsigned int trace_ctx)
@@ -3090,6 +3150,11 @@ ftrace_trace_userstack(struct trace_array *tr,
 	/* No point doing user space stacktraces on kernel threads */
 	if (current->flags & PF_KTHREAD)
 		return;
+
+	if (tr->trace_flags & TRACE_ITER_USERSTACKTRACE_DELAY) {
+		ftrace_trace_userstack_delay(tr, buffer, trace_ctx);
+		return;
+	}
 
 	/*
 	 * NMIs can not handle page faults, even with fix ups.
@@ -5189,6 +5254,17 @@ int trace_keep_overwrite(struct tracer *tracer, u32 mask, int set)
 	return 0;
 }
 
+static int update_unwind_deferred(struct trace_array *tr, int enabled)
+{
+	if (enabled) {
+		return unwind_deferred_init(&tr->unwinder,
+					    trace_user_unwind_callback);
+	} else {
+		unwind_deferred_cancel(&tr->unwinder);
+		return 0;
+	}
+}
+
 int set_tracer_flag(struct trace_array *tr, unsigned int mask, int enabled)
 {
 	if ((mask == TRACE_ITER_RECORD_TGID) ||
@@ -5222,6 +5298,19 @@ int set_tracer_flag(struct trace_array *tr, unsigned int mask, int enabled)
 			if (printk_trace == tr)
 				update_printk_trace(&global_trace);
 		}
+	}
+
+	if (mask == TRACE_ITER_USERSTACKTRACE) {
+		if (tr->trace_flags & TRACE_ITER_USERSTACKTRACE_DELAY) {
+			int ret = update_unwind_deferred(tr, enabled);
+			if (ret < 0)
+				return ret;
+		}
+	}
+
+	if (mask == TRACE_ITER_USERSTACKTRACE_DELAY) {
+		if (tr->trace_flags & TRACE_ITER_USERSTACKTRACE)
+			update_unwind_deferred(tr, enabled);
 	}
 
 	if (enabled)
@@ -9889,6 +9978,10 @@ static int __remove_instance(struct trace_array *tr)
 	/* Reference counter for a newly created trace array = 1. */
 	if (tr->ref > 1 || (tr->current_trace && tr->trace_ref))
 		return -EBUSY;
+
+	if ((tr->flags & (TRACE_ITER_USERSTACKTRACE & TRACE_ITER_USERSTACKTRACE_DELAY)) ==
+	    (TRACE_ITER_USERSTACKTRACE & TRACE_ITER_USERSTACKTRACE_DELAY))
+		unwind_deferred_cancel(&tr->unwinder);
 
 	list_del(&tr->list);
 
