@@ -467,6 +467,9 @@ config SFRAME_VALIDATION
 
 	  If unsure, say N.
 
+config HAVE_PERF_CALLCHAIN_DEFERRED
+	bool
+
 config HAVE_PERF_REGS
 	bool
 	help
