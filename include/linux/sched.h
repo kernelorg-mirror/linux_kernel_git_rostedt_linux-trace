@@ -37,6 +37,7 @@
 #include <linux/kcsan.h>
 #include <linux/rv.h>
 #include <linux/livepatch_sched.h>
+#include <linux/unwind_deferred_types.h>
 #include <asm/kmap_size.h>
 
 /* task_struct member predeclarations (sorted alphabetically): */
@@ -1540,6 +1541,10 @@ struct task_struct {
 
 #ifdef CONFIG_USER_EVENTS
 	struct user_event_mm		*user_event_mm;
+#endif
+
+#ifdef CONFIG_UNWIND_USER
+	struct unwind_task_info		unwind_info;
 #endif
 
 	/*
