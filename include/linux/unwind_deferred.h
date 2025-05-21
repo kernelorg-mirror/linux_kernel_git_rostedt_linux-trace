@@ -35,6 +35,8 @@ int unwind_deferred_init(struct unwind_work *work, unwind_callback_t func);
 int unwind_deferred_request(struct unwind_work *work, u64 *timestamp);
 void unwind_deferred_cancel(struct unwind_work *work);
 
+void unwind_deferred_task_exit(struct task_struct *task);
+
 static __always_inline void unwind_exit_to_user_mode(void)
 {
 	unsigned long bits;
@@ -64,7 +66,7 @@ static inline int unwind_deferred_trace(struct unwind_stacktrace *trace) { retur
 static inline int unwind_deferred_init(struct unwind_work *work, unwind_callback_t func) { return -ENOSYS; }
 static inline int unwind_deferred_request(struct unwind_work *work, u64 *timestamp) { return -ENOSYS; }
 static inline void unwind_deferred_cancel(struct unwind_work *work) {}
-
+static inline void unwind_deferred_task_exit(struct task_struct *task) {}
 static inline void unwind_exit_to_user_mode(void) {}
 
 #endif /* !CONFIG_UNWIND_USER */

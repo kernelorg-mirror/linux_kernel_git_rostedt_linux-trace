@@ -77,7 +77,7 @@ int unwind_deferred_trace(struct unwind_stacktrace *trace)
 	/* Should always be called from faultable context */
 	might_fault();
 
-	if (current->flags & PF_EXITING)
+	if (!current->mm)
 		return -EINVAL;
 
 	if (!info->cache) {
@@ -107,14 +107,13 @@ int unwind_deferred_trace(struct unwind_stacktrace *trace)
 	return 0;
 }
 
-static void unwind_deferred_task_work(struct callback_head *head)
+static void process_unwind_deferred(struct task_struct *task)
 {
-	struct unwind_task_info *info = container_of(head, struct unwind_task_info, work);
+	struct unwind_task_info *info = &task->unwind_info;
 	struct unwind_stacktrace trace;
 	struct unwind_work *work;
 	unsigned long bits;
 	u64 timestamp;
-	struct task_struct *task = current;
 	int idx;
 
 	if (WARN_ON_ONCE(!unwind_pending(task)))
@@ -150,6 +149,21 @@ static void unwind_deferred_task_work(struct callback_head *head)
 			work->func(work, &trace, timestamp);
 	}
 	srcu_read_unlock(&unwind_srcu, idx);
+}
+
+static void unwind_deferred_task_work(struct callback_head *head)
+{
+	process_unwind_deferred(current);
+}
+
+void unwind_deferred_task_exit(struct task_struct *task)
+{
+	if (!unwind_pending(task))
+		return;
+
+	process_unwind_deferred(task);
+
+	task_work_cancel(task, &task->unwind_info.work);
 }
 
 static int unwind_deferred_request_nmi(struct unwind_work *work, u64 *timestamp)

@@ -69,6 +69,7 @@
 #include <linux/rethook.h>
 #include <linux/sysfs.h>
 #include <linux/user_events.h>
+#include <linux/unwind_deferred.h>
 
 #include <linux/uaccess.h>
 #include <asm/unistd.h>
@@ -857,6 +858,7 @@ void __noreturn do_exit(long code)
 
 	tsk->exit_code = code;
 	taskstats_exit(tsk, group_dead);
+	unwind_deferred_task_exit(tsk);
 
 	exit_mm();
 
