@@ -56,6 +56,7 @@ enum trace_type {
 	TRACE_TIMERLAT,
 	TRACE_RAW_DATA,
 	TRACE_FUNC_REPEATS,
+	TRACE_PERF_EVENT,
 
 	__TRACE_LAST_TYPE,
 };
@@ -363,6 +364,8 @@ struct trace_array {
 
 	int			buffer_disabled;
 
+	int			perf_events;
+
 	struct trace_pid_list	__rcu *filtered_pids;
 	struct trace_pid_list	__rcu *filtered_no_pids;
 	/*
@@ -535,6 +538,7 @@ extern void __ftrace_bad_type(void);
 		IF_ASSIGN(var, ent, struct hwlat_entry, TRACE_HWLAT);	\
 		IF_ASSIGN(var, ent, struct osnoise_entry, TRACE_OSNOISE);\
 		IF_ASSIGN(var, ent, struct timerlat_entry, TRACE_TIMERLAT);\
+		IF_ASSIGN(var, ent, struct perf_event_entry, TRACE_PERF_EVENT);	\
 		IF_ASSIGN(var, ent, struct raw_data_entry, TRACE_RAW_DATA);\
 		IF_ASSIGN(var, ent, struct trace_mmiotrace_rw,		\
 			  TRACE_MMIO_RW);				\
@@ -1362,6 +1366,22 @@ extern int trace_get_user(struct trace_parser *parser, const char __user *ubuf,
 # define STACK_FLAGS
 #endif
 
+#ifdef CONFIG_PERF_EVENTS
+#define PERF_MAKE_VALUE(type, val)	(((type) << 56) | ((val) & ~(0xffULL << 56)))
+/* Not required, but keep consistent with include/uapi/linux/perf_event.h */
+#define PERF_TRACE_CYCLES		0ULL
+#define PERF_TRACE_CACHE		5ULL
+#define PERF_VALUE_CYCLES(val)		PERF_MAKE_VALUE(PERF_TRACE_CYCLES, val)
+#define PERF_VALUE_CACHE(val)		PERF_MAKE_VALUE(PERF_TRACE_CACHE, val)
+#define PERF_TRACE_VALUE(val)		((val) & ~(0xffULL << 56))
+#define PERF_TRACE_TYPE(val)		((val) >> 56)
+# define PERF_FLAGS				\
+		C(PERF_CACHE,		"event_cache_misses"),	\
+		C(PERF_CYCLES,		"event_cpu_cycles"),
+#else
+# define PERF_FLAGS
+#endif
+
 /*
  * trace_iterator_flags is an enumeration that defines bit
  * positions into trace_flags that controls the output.
@@ -1400,6 +1420,7 @@ extern int trace_get_user(struct trace_parser *parser, const char __user *ubuf,
 		FUNCTION_FLAGS					\
 		FGRAPH_FLAGS					\
 		STACK_FLAGS					\
+		PERF_FLAGS					\
 		BRANCH_FLAGS
 
 /*
@@ -2133,6 +2154,27 @@ int perf_ftrace_event_register(struct trace_event_call *call,
 			       enum trace_reg type, void *data);
 #else
 #define perf_ftrace_event_register NULL
+#endif
+
+#ifdef CONFIG_PERF_EVENTS
+u64 do_perf_cache_misses(void);
+u64 do_perf_cpu_cycles(void);
+int perf_cache_event_enable(void);
+int perf_cycles_event_enable(void);
+void perf_cache_event_disable(void);
+void perf_cycles_event_disable(void);
+void trace_perf_cache_misses(struct trace_array *tr,
+			     struct trace_buffer *buffer,
+			     unsigned int trace_ctx);
+#else
+static inline u64 do_perf_cache_misses(void) { return 0; }
+static inline u64 do_perf_cpu_cycles(void) { return 0; }
+static inline int perf_cache_event_enable(void) { return -ENOTSUPP; }
+static inline int perf_cycles_event_enable(void) { return -ENOTSUPP; }
+static inline void perf_cache_event_disable(void) { }
+static inline void perf_cycles_event_disable(void) { }
+static inline void record_perf_cache_misses(struct trace_array *tr,
+					   struct trace_buffer *buffer) { }
 #endif
 
 #ifdef CONFIG_FTRACE_SYSCALLS

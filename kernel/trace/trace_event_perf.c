@@ -430,6 +430,196 @@ void perf_trace_buf_update(void *record, u16 type)
 }
 NOKPROBE_SYMBOL(perf_trace_buf_update);
 
+static void perf_callback(struct perf_event *event,
+			  struct perf_sample_data *data,
+			  struct pt_regs *regs)
+{
+	/* nop */
+}
+
+struct trace_perf_event {
+	struct perf_event		*event;
+};
+
+static struct trace_perf_event __percpu *perf_cache_events;
+static struct trace_perf_event __percpu *perf_cycles_events;
+static DEFINE_MUTEX(perf_event_mutex);
+static int perf_cache_cnt;
+static int perf_cycles_cnt;
+
+static inline u64 do_perf_event(struct trace_perf_event __percpu *pevents,
+				int *perf_cnt)
+{
+	struct trace_perf_event __percpu *events;
+	struct perf_event *e;
+	int cpu;
+
+	guard(preempt)();
+
+	if (!*perf_cnt)
+		return 0;
+
+	events = READ_ONCE(pevents);
+	if (!events)
+		return 0;
+
+	cpu = smp_processor_id();
+
+	e = per_cpu_ptr(events, cpu)->event;
+	if (!e)
+		return 0;
+
+	e->pmu->read(e);
+	return local64_read(&e->count);
+}
+
+u64 do_perf_cache_misses(void)
+{
+	return do_perf_event(perf_cache_events, &perf_cache_cnt);
+}
+
+u64 do_perf_cpu_cycles(void)
+{
+	return do_perf_event(perf_cycles_events, &perf_cycles_cnt);
+}
+
+static void __free_trace_perf_events(struct trace_perf_event __percpu *events)
+{
+	struct perf_event *e;
+	int cpu;
+
+	for_each_online_cpu(cpu) {
+		e = per_cpu_ptr(events, cpu)->event;
+		per_cpu_ptr(events, cpu)->event = NULL;
+		perf_event_release_kernel(e);
+	}
+}
+
+static struct trace_perf_event __percpu *trace_perf_event_enable(int type, int config,
+								 int *err)
+{
+	struct perf_event_attr __free(kfree) *attr = NULL;
+	struct trace_perf_event __percpu *events;
+	struct perf_event *e;
+	int cpu;
+
+	lockdep_assert_held(&perf_event_mutex);
+
+	*err = -ENOMEM;
+	attr = kzalloc(sizeof(*attr), GFP_KERNEL);
+	if (!attr)
+		return NULL;
+
+	events = alloc_percpu(struct trace_perf_event);
+	if (!events)
+		return NULL;
+
+	attr->type = type;
+	attr->config = config;
+	attr->size = sizeof(struct perf_event_attr);
+	attr->pinned = 1;
+
+	/* initialize in case of failure */
+	for_each_possible_cpu(cpu) {
+		per_cpu_ptr(events, cpu)->event = NULL;
+	}
+
+	for_each_online_cpu(cpu) {
+		e = perf_event_create_kernel_counter(attr, cpu, NULL,
+						     perf_callback, NULL);
+		if (IS_ERR_OR_NULL(e)) {
+			__free_trace_perf_events(events);
+			*err = PTR_ERR(e);
+			return NULL;
+		}
+		per_cpu_ptr(events, cpu)->event = e;
+	}
+
+	return events;
+}
+
+int perf_cache_event_enable(void)
+{
+	struct trace_perf_event __percpu *events;
+	int err;
+
+	guard(mutex)(&perf_event_mutex);
+
+	if (perf_cache_cnt) {
+		perf_cache_cnt++;
+		return 0;
+	}
+
+	events = trace_perf_event_enable(PERF_TYPE_HW_CACHE,
+					 PERF_COUNT_HW_CACHE_MISSES, &err);
+	if (!events)
+		return err;
+
+	WRITE_ONCE(perf_cache_events, events);
+	perf_cache_cnt++;
+
+	return 0;
+}
+
+int perf_cycles_event_enable(void)
+{
+	struct trace_perf_event __percpu *events;
+	int err;
+
+	guard(mutex)(&perf_event_mutex);
+
+	if (perf_cycles_cnt) {
+		perf_cycles_cnt++;
+		return 0;
+	}
+
+	events = trace_perf_event_enable(PERF_TYPE_HARDWARE,
+					 PERF_COUNT_HW_CPU_CYCLES, &err);
+	if (!events)
+		return err;
+
+	WRITE_ONCE(perf_cycles_events, events);
+	perf_cycles_cnt++;
+
+	return 0;
+}
+
+void perf_cache_event_disable(void)
+{
+	struct trace_perf_event __percpu *events;
+
+	guard(mutex)(&perf_event_mutex);
+
+	if (WARN_ON_ONCE(!perf_cache_cnt))
+		return;
+
+	if (--perf_cache_cnt)
+		return;
+
+	events = READ_ONCE(perf_cache_events);
+	perf_cache_events = NULL;
+
+	__free_trace_perf_events(events);
+}
+
+void perf_cycles_event_disable(void)
+{
+	struct trace_perf_event __percpu *events;
+
+	guard(mutex)(&perf_event_mutex);
+
+	if (WARN_ON_ONCE(!perf_cycles_cnt))
+		return;
+
+	if (--perf_cycles_cnt)
+		return;
+
+	events = READ_ONCE(perf_cycles_events);
+	perf_cycles_events = NULL;
+
+	__free_trace_perf_events(events);
+}
+
 #ifdef CONFIG_FUNCTION_TRACER
 static void
 perf_ftrace_function_call(unsigned long ip, unsigned long parent_ip,
