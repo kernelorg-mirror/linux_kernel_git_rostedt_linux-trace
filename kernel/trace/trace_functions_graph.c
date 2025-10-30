@@ -19,6 +19,8 @@
 /* When set, irq functions will be ignored */
 static int ftrace_graph_skip_irqs;
 
+static struct tracer graph_trace;
+
 struct fgraph_cpu_data {
 	pid_t		last_pid;
 	int		depth;
@@ -90,6 +92,11 @@ static struct tracer_opt trace_opts[] = {
 	{ TRACER_OPT(graph-time, TRACE_GRAPH_GRAPH_TIME) },
 #endif
 
+#ifdef CONFIG_PERF_EVENTS
+	{ TRACER_OPT(funcgraph-cache-misses, TRACE_GRAPH_PERF_CACHE) },
+	{ TRACER_OPT(funcgraph-cpu-cycles, TRACE_GRAPH_PERF_CYCLES) },
+#endif
+
 	{ } /* Empty entry */
 };
 
@@ -105,6 +112,93 @@ static bool tracer_flags_is_set(u32 flags)
 {
 	return (tracer_flags.val & flags) == flags;
 }
+
+#ifdef CONFIG_PERF_EVENTS
+static void tracer_flags_clear(u32 flags)
+{
+	tracer_flags.val &= ~flags;
+}
+
+static int perf_events;
+static u64 perf_mask;
+
+static int ftrace_graph_perf_event(struct trace_array *tr, int set, int bit)
+{
+	u64 mask;
+	int ret = 0;
+
+	/* Do nothing if the current tracer is not this tracer */
+	if (tr->current_trace != &graph_trace)
+		return 0;
+
+	switch (bit) {
+	case TRACE_GRAPH_PERF_CACHE:
+		mask = TRACE_ITER(PERF_CACHE);
+		if (set)
+			ret = perf_cache_event_enable();
+		else
+			perf_cache_event_disable();
+		break;
+	case TRACE_GRAPH_PERF_CYCLES:
+		mask = TRACE_ITER(PERF_CYCLES);
+		if (set)
+			ret = perf_cycles_event_enable();
+		else
+			perf_cycles_event_disable();
+		break;
+	}
+
+	if (ret < 0)
+		return ret;
+
+	if (set) {
+		perf_events++;
+		perf_mask |= mask;
+	} else {
+		perf_mask &= ~mask;
+		perf_events--;
+	}
+	return 0;
+}
+
+static inline void handle_perf_event(struct trace_array *tr, unsigned int trace_ctx)
+{
+	if (!perf_events)
+		return;
+	ftrace_perf_events(tr, perf_events, perf_mask, trace_ctx);
+}
+
+static void fgraph_perf_init(void)
+{
+	if (tracer_flags_is_set(TRACE_GRAPH_PERF_CACHE)) {
+		if (perf_cache_event_enable() < 0)
+			tracer_flags_clear(TRACE_GRAPH_PERF_CACHE);
+	}
+
+	if (tracer_flags_is_set(TRACE_GRAPH_PERF_CYCLES)) {
+		if (perf_cycles_event_enable() < 0)
+			tracer_flags_clear(TRACE_GRAPH_PERF_CYCLES);
+	}
+}
+
+static void fgraph_perf_reset(void)
+{
+	if (tracer_flags_is_set(TRACE_GRAPH_PERF_CACHE))
+		perf_cache_event_disable();
+	if (tracer_flags_is_set(TRACE_GRAPH_PERF_CYCLES))
+		perf_cycles_event_disable();
+}
+#else
+static inline void handle_perf_event(struct trace_array *tr, unsigned int trace_ctx)
+{
+}
+static inline void fgraph_perf_init(void)
+{
+}
+static inline void fgraph_perf_reset(void)
+{
+}
+#endif
 
 /*
  * DURATION column is being also used to display IRQ signs,
@@ -261,6 +355,8 @@ static int graph_entry(struct ftrace_graph_ent *trace,
 	if (tracing_thresh)
 		return 1;
 
+	handle_perf_event(tr, trace_ctx);
+
 	trace_ctx = tracing_gen_ctx();
 	if (IS_ENABLED(CONFIG_FUNCTION_GRAPH_RETADDR) &&
 	    tracer_flags_is_set(TRACE_GRAPH_PRINT_RETADDR)) {
@@ -331,6 +427,8 @@ void __trace_graph_return(struct trace_array *tr,
 	entry->calltime				= calltime;
 	entry->rettime				= rettime;
 	trace_buffer_unlock_commit_nostack(buffer, event);
+
+	handle_perf_event(tr, trace_ctx);
 }
 
 static void handle_nosleeptime(struct ftrace_graph_ret *trace,
@@ -451,6 +549,8 @@ static int graph_trace_init(struct trace_array *tr)
 	else
 		tr->gops->retfunc = trace_graph_return;
 
+	fgraph_perf_init();
+
 	/* Make gops functions visible before we start tracing */
 	smp_mb();
 
@@ -461,8 +561,6 @@ static int graph_trace_init(struct trace_array *tr)
 
 	return 0;
 }
-
-static struct tracer graph_trace;
 
 static int ftrace_graph_trace_args(struct trace_array *tr, int set)
 {
@@ -492,6 +590,8 @@ static int ftrace_graph_trace_args(struct trace_array *tr, int set)
 
 static void graph_trace_reset(struct trace_array *tr)
 {
+	fgraph_perf_reset();
+		
 	tracing_stop_cmdline_record();
 	unregister_ftrace_graph(tr->gops);
 }
@@ -1613,17 +1713,28 @@ void graph_trace_close(struct trace_iterator *iter)
 static int
 func_graph_set_flag(struct trace_array *tr, u32 old_flags, u32 bit, int set)
 {
-	if (bit == TRACE_GRAPH_PRINT_IRQS)
+	switch (bit) {
+	case TRACE_GRAPH_PRINT_IRQS:
 		ftrace_graph_skip_irqs = !set;
+		break;
 
-	if (bit == TRACE_GRAPH_SLEEP_TIME)
+	case TRACE_GRAPH_SLEEP_TIME:
 		ftrace_graph_sleep_time_control(set);
+		break;
 
-	if (bit == TRACE_GRAPH_GRAPH_TIME)
+	case TRACE_GRAPH_GRAPH_TIME:
 		ftrace_graph_graph_time_control(set);
+		break;
 
-	if (bit == TRACE_GRAPH_ARGS)
+	case TRACE_GRAPH_ARGS:
 		return ftrace_graph_trace_args(tr, set);
+
+#ifdef CONFIG_PERF_EVENTS
+	case TRACE_GRAPH_PERF_CACHE:
+	case TRACE_GRAPH_PERF_CYCLES:
+		return ftrace_graph_perf_event(tr, set, bit);
+#endif
+	};
 
 	return 0;
 }

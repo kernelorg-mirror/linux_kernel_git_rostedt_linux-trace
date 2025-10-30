@@ -2907,18 +2907,15 @@ discard:
 EXPORT_SYMBOL_GPL(trace_event_buffer_commit);
 
 #ifdef CONFIG_PERF_EVENTS
-static inline void record_perf_event(struct trace_array *tr,
-				     struct trace_buffer *buffer,
-				     unsigned int trace_ctx)
+static inline void trace_perf_event(struct trace_array *tr,
+				    struct trace_buffer *buffer,
+				    int entries, u64 flags,
+				    unsigned int trace_ctx)
 {
 	struct ring_buffer_event *event;
 	struct perf_event_entry *entry;
-	int entries = READ_ONCE(tr->perf_events);
 	u64 *value;
 	int size;
-
-	if (!entries)
-		return;
 
 	size = struct_size(entry, values, entries);
 	event = trace_buffer_lock_reserve(buffer, TRACE_PERF_EVENT, size,
@@ -2928,12 +2925,12 @@ static inline void record_perf_event(struct trace_array *tr,
 	entry			= ring_buffer_event_data(event);
 	value			= entry->values;
 
-	if (tr->trace_flags & TRACE_ITER(PERF_CACHE)) {
+	if (flags & TRACE_ITER(PERF_CACHE)) {
 		*value++ = PERF_VALUE_CACHE(do_perf_cache_misses());
 		entries--;
 	}
 
-	if (entries && tr->trace_flags & TRACE_ITER(PERF_CYCLES)) {
+	if (entries && flags & TRACE_ITER(PERF_CYCLES)) {
 		*value++ = PERF_VALUE_CYCLES(do_perf_cpu_cycles());
 		entries--;
 	}
@@ -2944,6 +2941,49 @@ static inline void record_perf_event(struct trace_array *tr,
 
 	trace_buffer_unlock_commit_nostack(buffer, event);
 }
+
+static inline void record_perf_event(struct trace_array *tr,
+				     struct trace_buffer *buffer,
+				     unsigned int trace_ctx)
+{
+	int entries = READ_ONCE(tr->perf_events);
+
+	if (!entries)
+		return;
+
+	trace_perf_event(tr, buffer, entries, tr->trace_flags, trace_ctx);
+}
+
+#ifdef CONFIG_FUNCTION_TRACER
+void ftrace_perf_events(struct trace_array *tr, int perf_events,
+			u64 perf_mask, unsigned int trace_ctx)
+{
+	struct trace_buffer *buffer;
+	int bit;
+
+	/*
+	 * Prevent any ftrace recursion.
+	 * The ftrace_test_recursion_trylock() allows one nested loop
+	 * to handle the case where an interrupt comes in and traces
+	 * before the preempt_count is updated to the new context.
+	 * This one instance allows that function to still be traced.
+	 *
+	 * The trace_perf_cache_misses() will call functions that function
+	 * tracing will want to trace. Prevent this one loop from happening
+	 * by taking the the lock again. If an interrupt comes in now,
+	 * it may still be dropped, but there's really nothing that can
+	 * be done about that until all those locations get fixed.
+	 */
+	bit = ftrace_test_recursion_trylock(0, 0);
+
+	buffer = tr->array_buffer.buffer;
+	trace_perf_event(tr, buffer, perf_events, perf_mask, trace_ctx);
+
+	/* bit < 0 means the trylock failed and does not need to be unlocked */
+	if (bit >= 0)
+		ftrace_test_recursion_unlock(bit);
+}
+#endif
 
 static int handle_perf_event(struct trace_array *tr, u64 mask, int enabled)
 {

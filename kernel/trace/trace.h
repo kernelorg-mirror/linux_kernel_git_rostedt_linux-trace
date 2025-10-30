@@ -941,6 +941,8 @@ static __always_inline bool ftrace_hash_empty(struct ftrace_hash *hash)
 #define TRACE_GRAPH_PRINT_RETVAL_HEX    0x1000
 #define TRACE_GRAPH_PRINT_RETADDR       0x2000
 #define TRACE_GRAPH_ARGS		0x4000
+#define TRACE_GRAPH_PERF_CACHE		0x8000
+#define TRACE_GRAPH_PERF_CYCLES		0x10000
 #define TRACE_GRAPH_PRINT_FILL_SHIFT	28
 #define TRACE_GRAPH_PRINT_FILL_MASK	(0x3 << TRACE_GRAPH_PRINT_FILL_SHIFT)
 
@@ -2163,9 +2165,10 @@ int perf_cache_event_enable(void);
 int perf_cycles_event_enable(void);
 void perf_cache_event_disable(void);
 void perf_cycles_event_disable(void);
-void trace_perf_cache_misses(struct trace_array *tr,
-			     struct trace_buffer *buffer,
-			     unsigned int trace_ctx);
+#ifdef CONFIG_FUNCTION_TRACER
+void ftrace_perf_events(struct trace_array *tr, int perf_events,
+			u64 perf_mask, unsigned int trace_ctx);
+#endif
 #else
 static inline u64 do_perf_cache_misses(void) { return 0; }
 static inline u64 do_perf_cpu_cycles(void) { return 0; }
@@ -2173,8 +2176,6 @@ static inline int perf_cache_event_enable(void) { return -ENOTSUPP; }
 static inline int perf_cycles_event_enable(void) { return -ENOTSUPP; }
 static inline void perf_cache_event_disable(void) { }
 static inline void perf_cycles_event_disable(void) { }
-static inline void record_perf_cache_misses(struct trace_array *tr,
-					   struct trace_buffer *buffer) { }
 #endif
 
 #ifdef CONFIG_FTRACE_SYSCALLS
