@@ -84,15 +84,15 @@ extern void rt_mutex_proxy_unlock(struct rt_mutex_base *lock);
 extern int __rt_mutex_start_proxy_lock(struct rt_mutex_base *lock,
 				     struct rt_mutex_waiter *waiter,
 				     struct task_struct *task,
-				     struct wake_q_head *);
+				     struct wake_q_head *, bool do_ping);
 extern int rt_mutex_start_proxy_lock(struct rt_mutex_base *lock,
 				     struct rt_mutex_waiter *waiter,
-				     struct task_struct *task);
+				     struct task_struct *task, bool do_ping);
 extern int rt_mutex_wait_proxy_lock(struct rt_mutex_base *lock,
 			       struct hrtimer_sleeper *to,
 			       struct rt_mutex_waiter *waiter);
 extern bool rt_mutex_cleanup_proxy_lock(struct rt_mutex_base *lock,
-				 struct rt_mutex_waiter *waiter);
+				 struct rt_mutex_waiter *waiter, bool do_ping);
 
 extern int rt_mutex_futex_trylock(struct rt_mutex_base *l);
 extern int __rt_mutex_futex_trylock(struct rt_mutex_base *l);

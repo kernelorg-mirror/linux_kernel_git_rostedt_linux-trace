@@ -428,12 +428,17 @@ static __always_inline int rt_waiter_node_equal(struct rt_waiter_node *left,
 }
 
 static inline bool rt_mutex_steal(struct rt_mutex_waiter *waiter,
-				  struct rt_mutex_waiter *top_waiter)
+				  struct rt_mutex_waiter *top_waiter, bool do_ping)
 {
+	bool ret;
+
 	if (rt_waiter_node_less(&waiter->tree, &top_waiter->tree))
 		return true;
 
-#ifdef RT_MUTEX_BUILD_SPINLOCKS
+#ifndef RT_MUTEX_BUILD_SPINLOCKS
+	if (!do_ping)
+		return false;
+#endif
 	/*
 	 * Note that RT tasks are excluded from same priority (lateral)
 	 * steals to prevent the introduction of an unbounded latency.
@@ -441,10 +446,10 @@ static inline bool rt_mutex_steal(struct rt_mutex_waiter *waiter,
 	if (rt_or_dl_prio(waiter->tree.prio))
 		return false;
 
-	return rt_waiter_node_equal(&waiter->tree, &top_waiter->tree);
-#else
-	return false;
-#endif
+	ret = rt_waiter_node_equal(&waiter->tree, &top_waiter->tree);
+	if (ret)
+		trace_printk("LOCK STOLEN!\n");
+	return ret;
 }
 
 #define __node_2_waiter(node) \
@@ -1085,7 +1090,7 @@ static int __sched rt_mutex_adjust_prio_chain(struct task_struct *task,
  */
 static int __sched
 try_to_take_rt_mutex(struct rt_mutex_base *lock, struct task_struct *task,
-		     struct rt_mutex_waiter *waiter)
+		     struct rt_mutex_waiter *waiter, bool do_ping)
 {
 	lockdep_assert_held(&lock->wait_lock);
 
@@ -1126,7 +1131,7 @@ try_to_take_rt_mutex(struct rt_mutex_base *lock, struct task_struct *task,
 		 * If waiter is the highest priority waiter of @lock,
 		 * or allowed to steal it, take it over.
 		 */
-		if (waiter == top_waiter || rt_mutex_steal(waiter, top_waiter)) {
+		if (waiter == top_waiter || rt_mutex_steal(waiter, top_waiter, do_ping)) {
 			/*
 			 * We can acquire the lock. Remove the waiter from the
 			 * lock waiters tree.
@@ -1147,7 +1152,7 @@ try_to_take_rt_mutex(struct rt_mutex_base *lock, struct task_struct *task,
 		if (rt_mutex_has_waiters(lock)) {
 			/* Check whether the trylock can steal it. */
 			if (!rt_mutex_steal(task_to_waiter(task),
-					    rt_mutex_top_waiter(lock)))
+					    rt_mutex_top_waiter(lock), do_ping))
 				return 0;
 
 			/*
@@ -1357,7 +1362,7 @@ static void __sched mark_wakeup_next_waiter(struct rt_wake_q_head *wqh,
 
 static int __sched __rt_mutex_slowtrylock(struct rt_mutex_base *lock)
 {
-	int ret = try_to_take_rt_mutex(lock, current, NULL);
+	int ret = try_to_take_rt_mutex(lock, current, NULL, false);
 
 	/*
 	 * try_to_take_rt_mutex() sets the lock waiters bit
@@ -1616,7 +1621,7 @@ static int __sched rt_mutex_slowlock_block(struct rt_mutex_base *lock,
 	lockevent_inc(rtmutex_slow_block);
 	for (;;) {
 		/* Try to acquire the lock: */
-		if (try_to_take_rt_mutex(lock, current, waiter)) {
+		if (try_to_take_rt_mutex(lock, current, waiter, false)) {
 			lockevent_inc(rtmutex_slow_acq3);
 			break;
 		}
@@ -1703,7 +1708,7 @@ static int __sched __rt_mutex_slowlock(struct rt_mutex_base *lock,
 	lockevent_inc(rtmutex_slowlock);
 
 	/* Try to acquire the lock again: */
-	if (try_to_take_rt_mutex(lock, current, NULL)) {
+	if (try_to_take_rt_mutex(lock, current, NULL, false)) {
 		if (build_ww_mutex() && ww_ctx) {
 			__ww_mutex_check_waiters(rtm, ww_ctx, wake_q);
 			ww_mutex_lock_acquired(ww, ww_ctx);

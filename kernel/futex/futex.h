@@ -443,8 +443,9 @@ extern int futex_wake(u32 __user *uaddr, unsigned int flags, int nr_wake, u32 bi
 extern int futex_wake_op(u32 __user *uaddr1, unsigned int flags,
 			 u32 __user *uaddr2, int nr_wake, int nr_wake2, int op);
 
-extern int futex_unlock_pi(u32 __user *uaddr, unsigned int flags);
+extern int futex_unlock_pi(u32 __user *uaddr, unsigned int flags, bool do_ping);
 
-extern int futex_lock_pi(u32 __user *uaddr, unsigned int flags, ktime_t *time, int trylock);
+extern int futex_lock_pi(u32 __user *uaddr, unsigned int flags, ktime_t *time,
+			 int trylock, bool do_ping);
 
 #endif /* _FUTEX_H */

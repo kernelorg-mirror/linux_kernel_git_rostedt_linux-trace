@@ -311,13 +311,13 @@ void __sched rt_mutex_proxy_unlock(struct rt_mutex_base *lock)
 int __sched __rt_mutex_start_proxy_lock(struct rt_mutex_base *lock,
 					struct rt_mutex_waiter *waiter,
 					struct task_struct *task,
-					struct wake_q_head *wake_q)
+					struct wake_q_head *wake_q, bool do_ping)
 {
 	int ret;
 
 	lockdep_assert_held(&lock->wait_lock);
 
-	if (try_to_take_rt_mutex(lock, task, NULL))
+	if (try_to_take_rt_mutex(lock, task, NULL, do_ping))
 		return 1;
 
 	/* We enforce deadlock detection for futexes */
@@ -358,13 +358,13 @@ int __sched __rt_mutex_start_proxy_lock(struct rt_mutex_base *lock,
  */
 int __sched rt_mutex_start_proxy_lock(struct rt_mutex_base *lock,
 				      struct rt_mutex_waiter *waiter,
-				      struct task_struct *task)
+				      struct task_struct *task, bool do_ping)
 {
 	int ret;
 	DEFINE_WAKE_Q(wake_q);
 
 	raw_spin_lock_irq(&lock->wait_lock);
-	ret = __rt_mutex_start_proxy_lock(lock, waiter, task, &wake_q);
+	ret = __rt_mutex_start_proxy_lock(lock, waiter, task, &wake_q, do_ping);
 	if (unlikely(ret))
 		remove_waiter(lock, waiter);
 	preempt_disable();
@@ -433,7 +433,7 @@ int __sched rt_mutex_wait_proxy_lock(struct rt_mutex_base *lock,
  * Special API call for PI-futex support
  */
 bool __sched rt_mutex_cleanup_proxy_lock(struct rt_mutex_base *lock,
-					 struct rt_mutex_waiter *waiter)
+					 struct rt_mutex_waiter *waiter, bool do_ping)
 {
 	bool cleanup = false;
 
@@ -449,7 +449,7 @@ bool __sched rt_mutex_cleanup_proxy_lock(struct rt_mutex_base *lock,
 	 * failed the trylock, we're still not owner and we need to remove
 	 * ourselves.
 	 */
-	try_to_take_rt_mutex(lock, current, waiter);
+	try_to_take_rt_mutex(lock, current, waiter, do_ping);
 	/*
 	 * Unless we're the owner; we're still enqueued on the wait_list.
 	 * So check if we became owner, if not, take us off the wait_list.

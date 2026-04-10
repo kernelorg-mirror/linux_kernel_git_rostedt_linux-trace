@@ -915,7 +915,8 @@ int fixup_pi_owner(u32 __user *uaddr, struct futex_q *q, int locked)
  *
  * Also serves as futex trylock_pi()'ing, and due semantics.
  */
-int futex_lock_pi(u32 __user *uaddr, unsigned int flags, ktime_t *time, int trylock)
+int futex_lock_pi(u32 __user *uaddr, unsigned int flags, ktime_t *time, int trylock,
+		  bool do_ping)
 {
 	struct hrtimer_sleeper timeout, *to;
 	struct task_struct *exiting;
@@ -1032,7 +1033,7 @@ retry_private:
 		 * such that futex_unlock_pi() is guaranteed to observe the waiter when
 		 * it sees the futex_q::pi_state.
 		 */
-		ret = __rt_mutex_start_proxy_lock(&q.pi_state->pi_mutex, &rt_waiter, current, &wake_q);
+		ret = __rt_mutex_start_proxy_lock(&q.pi_state->pi_mutex, &rt_waiter, current, &wake_q, do_ping);
 		raw_spin_unlock_irq_wake(&q.pi_state->pi_mutex.wait_lock, &wake_q);
 
 		if (ret) {
@@ -1065,7 +1066,7 @@ cleanup:
 		 *
 		 * What could possibly go wrong...
 		 */
-		if (ret && !rt_mutex_cleanup_proxy_lock(&q.pi_state->pi_mutex, &rt_waiter))
+		if (ret && !rt_mutex_cleanup_proxy_lock(&q.pi_state->pi_mutex, &rt_waiter, do_ping))
 			ret = 0;
 
 		/*
@@ -1130,7 +1131,7 @@ out:
  * This is the in-kernel slowpath: we look up the PI state (if any),
  * and do the rt-mutex unlock.
  */
-int futex_unlock_pi(u32 __user *uaddr, unsigned int flags)
+int futex_unlock_pi(u32 __user *uaddr, unsigned int flags, bool do_ping)
 {
 	u32 curval, uval, vpid = task_pid_vnr(current);
 	union futex_key key = FUTEX_KEY_INIT;

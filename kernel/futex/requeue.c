@@ -642,7 +642,7 @@ retry_private:
 
 			ret = rt_mutex_start_proxy_lock(&pi_state->pi_mutex,
 							this->rt_waiter,
-							this->task);
+							this->task, false);
 
 			if (ret == 1) {
 				/*
@@ -862,7 +862,7 @@ int futex_wait_requeue_pi(u32 __user *uaddr, unsigned int flags,
 		/*
 		 * See futex_unlock_pi()'s cleanup: comment.
 		 */
-		if (ret && !rt_mutex_cleanup_proxy_lock(pi_mutex, &rt_waiter))
+		if (ret && !rt_mutex_cleanup_proxy_lock(pi_mutex, &rt_waiter, false))
 			ret = 0;
 
 		futex_q_lockptr_lock(&q);

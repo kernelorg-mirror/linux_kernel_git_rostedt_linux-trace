@@ -114,6 +114,7 @@ long do_futex(u32 __user *uaddr, int op, u32 val, ktime_t *timeout,
 {
 	unsigned int flags = futex_to_flags(op);
 	int cmd = op & FUTEX_CMD_MASK;
+	bool do_ping = false;
 
 	if (flags & FLAGS_CLOCKRT) {
 		if (cmd != FUTEX_WAIT_BITSET &&
@@ -139,15 +140,21 @@ long do_futex(u32 __user *uaddr, int op, u32 val, ktime_t *timeout,
 		return futex_requeue(uaddr, flags, uaddr2, flags, val, val2, &val3, 0);
 	case FUTEX_WAKE_OP:
 		return futex_wake_op(uaddr, flags, uaddr2, val, val2, val3);
+	case FUTEX_LOCK_PING:
+		do_ping = true;
+		fallthrough;
 	case FUTEX_LOCK_PI:
 		flags |= FLAGS_CLOCKRT;
 		fallthrough;
 	case FUTEX_LOCK_PI2:
-		return futex_lock_pi(uaddr, flags, timeout, 0);
+		return futex_lock_pi(uaddr, flags, timeout, 0, do_ping);
+	case FUTEX_UNLOCK_PING:
+		do_ping = true;
+		fallthrough;
 	case FUTEX_UNLOCK_PI:
-		return futex_unlock_pi(uaddr, flags);
+		return futex_unlock_pi(uaddr, flags, do_ping);
 	case FUTEX_TRYLOCK_PI:
-		return futex_lock_pi(uaddr, flags, NULL, 1);
+		return futex_lock_pi(uaddr, flags, NULL, 1, do_ping);
 	case FUTEX_WAIT_REQUEUE_PI:
 		val3 = FUTEX_BITSET_MATCH_ANY;
 		return futex_wait_requeue_pi(uaddr, flags, val, timeout, val3,
@@ -203,7 +210,7 @@ const char * __futex_cmds[] =
 	"FUTEX_CMP_REQUEUE", "FUTEX_WAKE_OP", "FUTEX_LOCK_PI",
 	"FUTEX_UNLOCK_PI", "FUTEX_TRYLOCK_PI", "FUTEX_WAIT_BITSET",
 	"FUTEX_WAKE_BITSET", "FUTEX_WAIT_REQUEUE_PI", "FUTEX_CMP_REQUEUE_PI",
-	"FUTEX_LOCK_PI2", NULL
+	"FUTEX_LOCK_PI2", "FUTEX_LOCK_PING", "FUTEX_UNLOCK_PING", NULL
 };
 
 void futex_print_syscall(struct seq_buf *s, int nr_args, unsigned long *args,
@@ -234,6 +241,8 @@ void futex_print_syscall(struct seq_buf *s, int nr_args, unsigned long *args,
 				switch(cmd) {
 				case FUTEX_LOCK_PI:
 				case FUTEX_UNLOCK_PI:
+				case FUTEX_LOCK_PING:
+				case FUTEX_UNLOCK_PING:
 					seq_buf_printf(s, " tid: %d",
 						       val & FUTEX_TID_MASK);
 
@@ -254,7 +263,7 @@ void futex_print_syscall(struct seq_buf *s, int nr_args, unsigned long *args,
 			}
 			continue;
 		case 1:
-			if (cmd <= FUTEX_LOCK_PI2)
+			if (cmd < ARRAY_SIZE(__futex_cmds) - 1)
 				seq_buf_printf(s, ", %s", __futex_cmds[cmd]);
 			else
 				seq_buf_puts(s, ", UNKNOWN");
